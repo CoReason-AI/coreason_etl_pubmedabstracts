@@ -11,6 +11,8 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from dlt.extract.exceptions import ResourceExtractionError
+
 from coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline import (
     pubmed_baseline,
     pubmed_updates,
@@ -61,3 +63,18 @@ class TestPubmedPipeline(unittest.TestCase):
 
         records = list(resource)
         self.assertEqual(len(records), 1)
+
+    @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.list_remote_files")
+    @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.open_remote_file")
+    def test_file_open_error(self, mock_open: MagicMock, mock_list: MagicMock) -> None:
+        """Test resilience when file opening fails."""
+        mock_list.return_value = ["/pubmed/baseline/file1.xml.gz"]
+        mock_open.side_effect = IOError("Network Error")
+
+        resource = pubmed_baseline()
+
+        # dlt wraps exceptions in ResourceExtractionError
+        with self.assertRaises(ResourceExtractionError) as cm:
+            list(resource)
+
+        self.assertIn("Network Error", str(cm.exception))

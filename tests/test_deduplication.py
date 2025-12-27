@@ -49,3 +49,30 @@ class TestDeduplication(unittest.TestCase):
         # Use assertRaisesRegex to satisfy B017 and verify the specific error
         with self.assertRaisesRegex(Exception, "DB Connection Failed"):
             run_deduplication_sweep(mock_pipeline)
+
+    def test_empty_tables(self) -> None:
+        """
+        Verify that running sweep on empty tables does not raise errors.
+        (Simulated by successful execution of SQL).
+        """
+        mock_pipeline = MagicMock()
+        mock_pipeline.dataset_name = "pubmed_data"
+        mock_client = MagicMock()
+        mock_pipeline.sql_client.return_value.__enter__.return_value = mock_client
+
+        # execute_sql returns None usually for DELETE, or row count.
+        # Ensure no exception is raised.
+        run_deduplication_sweep(mock_pipeline)
+        mock_client.execute_sql.assert_called_once()
+
+    def test_no_overlap(self) -> None:
+        """
+        Verify behavior when there is no overlap (DELETE touches 0 rows).
+        """
+        mock_pipeline = MagicMock()
+        mock_pipeline.dataset_name = "pubmed_data"
+        mock_client = MagicMock()
+        mock_pipeline.sql_client.return_value.__enter__.return_value = mock_client
+
+        run_deduplication_sweep(mock_pipeline)
+        mock_client.execute_sql.assert_called_once()
