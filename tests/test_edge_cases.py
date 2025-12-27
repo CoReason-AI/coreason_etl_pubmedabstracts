@@ -71,7 +71,8 @@ class TestEdgeCases(unittest.TestCase):
 
         # Expecting failure to match simple "MedlineCitation" against "{...}MedlineCitation"
         # If we want to support namespaces, we should probably remove the `tag` filter or make it namespace-aware.
-        # For now, let's assert what currently happens (likely 0 records) or update code if requirement implies namespace support.
+        # For now, let's assert what currently happens (likely 0 records)
+        # or update code if requirement implies namespace support.
         # Assuming current code is strict.
         self.assertEqual(len(records), 0)
 
