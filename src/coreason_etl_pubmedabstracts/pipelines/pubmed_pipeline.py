@@ -51,7 +51,7 @@ def _wrap_record(record: Dict[str, Any], file_name: str) -> Dict[str, Any]:
     }
 
 
-@dlt.resource(write_disposition="replace", table_name="bronze_pubmed_raw")  # type: ignore[misc]
+@dlt.resource(write_disposition="replace", table_name="bronze_pubmed_baseline")  # type: ignore[misc]
 def pubmed_baseline(host: str = "ftp.ncbi.nlm.nih.gov") -> Iterator[Dict[str, Any]]:
     """
     Resource for PubMed Baseline.
@@ -72,7 +72,7 @@ def pubmed_baseline(host: str = "ftp.ncbi.nlm.nih.gov") -> Iterator[Dict[str, An
                 yield _wrap_record(record, file_name)
 
 
-@dlt.resource(write_disposition="append", table_name="bronze_pubmed_raw")  # type: ignore[misc]
+@dlt.resource(write_disposition="append", table_name="bronze_pubmed_updates")  # type: ignore[misc]
 def pubmed_updates(host: str = "ftp.ncbi.nlm.nih.gov") -> Iterator[Dict[str, Any]]:
     """
     Resource for PubMed Updates.

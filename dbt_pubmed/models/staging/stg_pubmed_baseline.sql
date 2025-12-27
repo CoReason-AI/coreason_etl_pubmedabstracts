@@ -1,0 +1,59 @@
+with source as (
+    select * from {{ source('pubmed', 'bronze_pubmed_baseline') }}
+),
+
+parsed as (
+    select
+        file_name,
+        ingestion_ts,
+        content_hash,
+        raw_data,
+        -- Extract common fields safely handling both string and object variants
+        -- PMID
+        case
+            when jsonb_typeof(raw_data -> 'MedlineCitation' -> 'PMID' -> 0) = 'string' then
+                 raw_data -> 'MedlineCitation' -> 'PMID' ->> 0
+            else
+                 raw_data -> 'MedlineCitation' -> 'PMID' -> 0 ->> '#text'
+        end as pmid,
+
+        -- Title
+        -- ArticleTitle might be a string or object (if it has attributes)
+        case
+            when jsonb_typeof(raw_data -> 'MedlineCitation' -> 'Article' -> 'ArticleTitle') = 'string' then
+                 raw_data -> 'MedlineCitation' -> 'Article' ->> 'ArticleTitle'
+            else
+                 raw_data -> 'MedlineCitation' -> 'Article' -> 'ArticleTitle' ->> '#text'
+        end as title,
+
+        -- Abstract
+        -- AbstractText can be complex.
+        case
+            when jsonb_typeof(raw_data -> 'MedlineCitation' -> 'Article' -> 'Abstract' -> 'AbstractText') = 'string' then
+                 raw_data -> 'MedlineCitation' -> 'Article' -> 'Abstract' ->> 'AbstractText'
+            when jsonb_typeof(raw_data -> 'MedlineCitation' -> 'Article' -> 'Abstract' -> 'AbstractText') = 'array' then
+                (select string_agg(coalesce(item ->> '#text', item #>> '{}'), ' ')
+                 from jsonb_array_elements(raw_data -> 'MedlineCitation' -> 'Article' -> 'Abstract' -> 'AbstractText') as item)
+            else
+                 raw_data -> 'MedlineCitation' -> 'Article' -> 'Abstract' -> 'AbstractText' ->> '#text'
+        end as abstract_text,
+
+        -- Publication Year
+        raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'Year' as pub_year,
+
+        -- Authors (Already normalized to list in Python)
+        -- Path: Article -> AuthorList -> Author
+        raw_data -> 'MedlineCitation' -> 'Article' -> 'AuthorList' -> 'Author' as authors,
+
+        -- MeSH (Already normalized to list in Python)
+        raw_data -> 'MedlineCitation' -> 'MeshHeadingList' -> 'MeshHeading' as mesh_terms,
+
+        -- Language
+        raw_data -> 'MedlineCitation' -> 'Article' -> 'Language' as languages,
+
+        'upsert' as operation
+
+    from source
+)
+
+select * from parsed

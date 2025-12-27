@@ -35,7 +35,9 @@ class TestXmlUtils(unittest.TestCase):
 
         self.assertEqual(len(records), 1)
         self.assertIn("MedlineCitation", records[0])
-        self.assertEqual(records[0]["MedlineCitation"]["PMID"]["#text"], "123456")
+        # PMID should be a list now because of FORCE_LIST_KEYS
+        self.assertIsInstance(records[0]["MedlineCitation"]["PMID"], list)
+        self.assertEqual(records[0]["MedlineCitation"]["PMID"][0]["#text"], "123456")
 
     def test_parse_delete_citation(self) -> None:
         xml_content = b"""
@@ -50,9 +52,13 @@ class TestXmlUtils(unittest.TestCase):
         records = list(parse_pubmed_xml(stream))
 
         self.assertEqual(len(records), 1)
-        self.assertIn("DeleteCitation", records[0])
-        # xmltodict handles list of children with same name as list
-        pmids = records[0]["DeleteCitation"]["PMID"]
+        # DeleteCitation is in FORCE_LIST_KEYS, so it is a list
+        self.assertIsInstance(records[0]["DeleteCitation"], list)
+        delete_citation = records[0]["DeleteCitation"][0]
+
+        # PMID is in FORCE_LIST_KEYS, so it is a list
+        pmids = delete_citation["PMID"]
+        self.assertIsInstance(pmids, list)
         self.assertEqual(len(pmids), 2)
         self.assertEqual(pmids[0]["#text"], "999999")
 
@@ -77,3 +83,51 @@ class TestXmlUtils(unittest.TestCase):
         self.assertIn("MedlineCitation", records[0])
         self.assertIn("DeleteCitation", records[1])
         self.assertIn("MedlineCitation", records[2])
+
+    def test_normalization_force_list(self) -> None:
+        """Test that specified keys are always lists even if single."""
+        xml_content = b"""
+        <PubmedArticleSet>
+            <MedlineCitation>
+                <PMID>100</PMID>
+                <Article>
+                    <AuthorList>
+                        <Author>
+                            <LastName>Doe</LastName>
+                            <ForeName>John</ForeName>
+                        </Author>
+                    </AuthorList>
+                    <PublicationTypeList>
+                        <PublicationType>Journal Article</PublicationType>
+                    </PublicationTypeList>
+                </Article>
+                <MeshHeadingList>
+                    <MeshHeading>
+                        <DescriptorName>Science</DescriptorName>
+                    </MeshHeading>
+                </MeshHeadingList>
+            </MedlineCitation>
+        </PubmedArticleSet>
+        """
+        stream = BytesIO(xml_content)
+        records = list(parse_pubmed_xml(stream))
+
+        citation = records[0]["MedlineCitation"]
+
+        # Author should be a list
+        authors = citation["Article"]["AuthorList"]["Author"]
+        self.assertIsInstance(authors, list)
+        self.assertEqual(len(authors), 1)
+        self.assertEqual(authors[0]["LastName"], "Doe")
+
+        # PublicationType should be a list
+        pub_types = citation["Article"]["PublicationTypeList"]["PublicationType"]
+        self.assertIsInstance(pub_types, list)
+        self.assertEqual(len(pub_types), 1)
+        # Without attributes, xmltodict returns the string directly
+        self.assertEqual(pub_types[0], "Journal Article")
+
+        # MeshHeading should be a list
+        mesh_headings = citation["MeshHeadingList"]["MeshHeading"]
+        self.assertIsInstance(mesh_headings, list)
+        self.assertEqual(len(mesh_headings), 1)

@@ -13,6 +13,34 @@ from typing import IO, Any, Dict, Iterator
 import xmltodict
 from lxml import etree
 
+# Keys that should always be parsed as a list, even if only one element exists.
+# This ensures consistent JSON structure for downstream processing.
+FORCE_LIST_KEYS = (
+    "Author",
+    "ArticleId",
+    "Chemical",
+    "DataBank",
+    "DeleteCitation",  # Though usually wrapper, children PMIDs should be list? No, PMID is the child.
+    "ELocationID",
+    "GeneSymbol",
+    "Grant",
+    "Investigator",
+    "Keyword",
+    "Language",
+    "MeshHeading",
+    "NameOfSubstance",
+    "Object",
+    "OtherAbstract",
+    "OtherID",
+    "PersonalNameSubject",
+    "PMID",  # In DeleteCitation, multiple PMIDs can exist. In MedlineCitation, usually one, but being safe.
+    "PublicationType",
+    "Reference",
+    "SpaceFlightMission",
+    "GeneralNote",
+    "SupplMeshName",
+)
+
 
 def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
     """
@@ -26,31 +54,19 @@ def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
         Dictionary representations of the XML elements.
     """
     # iterparse events: 'end' is sufficient for complete elements.
-    context = etree.iterparse(file_stream, events=("end",), tag=["MedlineCitation", "DeleteCitation"])
+    context = etree.iterparse(
+        file_stream, events=("end",), tag=["MedlineCitation", "DeleteCitation"]
+    )
 
     for _event, elem in context:
-        # Convert to dict
-        # We use xmltodict.parse on the element's string representation?
-        # Or cleaner: convert the element tree to a string then parse?
-        # A bit inefficient to serialize back to string.
-        # xmltodict works on file-like or string.
-
-        # Optimization: xmltodict doesn't support lxml elements directly efficiently.
-        # But we can use elem_to_dict approach or serialize.
-        # Given "xmltodict" dependency was requested, let's use it.
-        # But for high throughput, we might want to be careful.
-
-        # To use xmltodict with lxml element, we can serialize it.
+        # Convert the lxml element to a string
         xml_str = etree.tostring(elem, encoding="unicode")
-        doc = xmltodict.parse(xml_str)
 
-        # doc is {tag: content}. We might want to flatten or wrap it uniformly.
-        # For MedlineCitation, the root key is "MedlineCitation".
-        # For DeleteCitation, it is "DeleteCitation".
-
-        # We will yield the whole dict with its root key preserved,
-        # so dlt can store it as is, or we can wrap it.
-        # But usually dlt expects a dict.
+        # Parse with xmltodict, forcing specific keys to be lists
+        doc = xmltodict.parse(
+            xml_str,
+            force_list=FORCE_LIST_KEYS
+        )
 
         yield doc
 
