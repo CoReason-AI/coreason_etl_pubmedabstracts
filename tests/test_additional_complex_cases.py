@@ -49,10 +49,12 @@ class TestAdditionalComplexCases(unittest.TestCase):
         self.assertEqual(len(records), 2)
 
         # Record 1
+        # With normalization, even single item is a list
         pt1 = records[0]["MedlineCitation"]["Article"]["PublicationTypeList"]["PublicationType"]
-        self.assertIsInstance(pt1, dict)
-        self.assertEqual(pt1["#text"], "Journal Article")
-        self.assertEqual(pt1["@UI"], "D016428")
+        self.assertIsInstance(pt1, list)
+        self.assertEqual(len(pt1), 1)
+        self.assertEqual(pt1[0]["#text"], "Journal Article")
+        self.assertEqual(pt1[0]["@UI"], "D016428")
 
         # Record 2
         pt2 = records[1]["MedlineCitation"]["Article"]["PublicationTypeList"]["PublicationType"]
@@ -103,7 +105,8 @@ class TestAdditionalComplexCases(unittest.TestCase):
         records = list(parse_pubmed_xml(stream))
 
         self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["MedlineCitation"]["PMID"], "1")
+        # PMID is a list now
+        self.assertEqual(records[0]["MedlineCitation"]["PMID"][0], "1")
         # Ensure comments are not in the dict (xmltodict ignores them by default unless configured otherwise)
         self.assertNotIn("#comment", records[0]["MedlineCitation"])
 
@@ -150,7 +153,8 @@ class TestAdditionalComplexCases(unittest.TestCase):
         count = 0
         for record in records_iter:
             count += 1
-            self.assertEqual(record["MedlineCitation"]["PMID"], "1")
+            # PMID is list
+            self.assertEqual(record["MedlineCitation"]["PMID"][0], "1")
 
         self.assertEqual(count, 100)
 

@@ -57,7 +57,8 @@ class TestPipelineIntegration(unittest.TestCase):
         # Verify parsed content
         raw_data = data[0]["raw_data"]
         self.assertIn("MedlineCitation", raw_data)
-        self.assertEqual(raw_data["MedlineCitation"]["PMID"]["#text"], "1001")
+        # PMID is a list now
+        self.assertEqual(raw_data["MedlineCitation"]["PMID"][0]["#text"], "1001")
 
     @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.open_remote_file")
     @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.list_remote_files")
