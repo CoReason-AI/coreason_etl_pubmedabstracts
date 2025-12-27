@@ -12,8 +12,6 @@ import unittest
 from io import BytesIO
 from unittest.mock import MagicMock, patch
 
-from lxml import etree
-
 from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
 
 
@@ -134,7 +132,7 @@ class TestAdvancedResilience(unittest.TestCase):
 
         # Verify cleanup of previous siblings
         # We expected loop to run once
-        mock_elem.getparent.assert_called() # Called to check parent
+        mock_elem.getparent.assert_called()  # Called to check parent
         mock_parent.__delitem__.assert_called_with(0)
 
     def test_unicode_surrogates_and_edge_chars(self) -> None:
@@ -147,7 +145,7 @@ class TestAdvancedResilience(unittest.TestCase):
             <MedlineCitation>
                 <PMID>1</PMID>
                 <Article>
-                    <ArticleTitle>Study on \xF0\x9F\x98\x80 (Grinning Face) &amp; \xE2\x88\x91 (Sum)</ArticleTitle>
+                    <ArticleTitle>Study on \xf0\x9f\x98\x80 (Grinning Face) &amp; \xe2\x88\x91 (Sum)</ArticleTitle>
                 </Article>
             </MedlineCitation>
         </PubmedArticleSet>
