@@ -35,22 +35,12 @@ class TestComplexScenarios(unittest.TestCase):
 
         self.assertEqual(len(records), 1)
         title = records[0]["MedlineCitation"]["Article"]["ArticleTitle"]
-        # xmltodict might return dict if no attrs, or string.
-        # In previous test we saw simple tags returning dict? No, <PMID>1</PMID> -> '1'.
-        # Let's handle both just in case, or verify behavior.
-        # Based on previous tests, simple elements are strings?
-        # Wait, in test_xml_utils.py I asserted records[0]["MedlineCitation"]["PMID"]["#text"] == "123456"
-        # because I added Version="1".
-        # Here I have no attributes.
-
-        # Let's inspect what we get.
         self.assertIn("\u03b1-Helix", title)
         self.assertIn("caf\u00e9", title)
 
     def test_structural_variance_list_vs_dict(self) -> None:
         """
-        Verify that single items are dicts and multiple items are lists.
-        This is critical for downstream SQL to know it must handle variants.
+        Verify that single items are forced to lists due to normalization.
         """
         xml_content = b"""
         <PubmedArticleSet>
@@ -78,10 +68,11 @@ class TestComplexScenarios(unittest.TestCase):
 
         self.assertEqual(len(records), 2)
 
-        # First record: Single Author -> Dict (or OrderedDict)
+        # First record: Single Author -> Should be list now
         authors1 = records[0]["MedlineCitation"]["Article"]["AuthorList"]["Author"]
-        self.assertIsInstance(authors1, dict)
-        self.assertEqual(authors1["LastName"], "Doe")
+        self.assertIsInstance(authors1, list)
+        self.assertEqual(len(authors1), 1)
+        self.assertEqual(authors1[0]["LastName"], "Doe")
 
         # Second record: Multiple Authors -> List
         authors2 = records[1]["MedlineCitation"]["Article"]["AuthorList"]["Author"]
@@ -109,6 +100,7 @@ class TestComplexScenarios(unittest.TestCase):
         self.assertIn("MedlineCitation", records[1])
         self.assertIn("DeleteCitation", records[2])
 
-        self.assertEqual(records[0]["DeleteCitation"]["PMID"], "99")
-        self.assertEqual(records[1]["MedlineCitation"]["PMID"], "100")
-        self.assertEqual(records[2]["DeleteCitation"]["PMID"], "98")
+        # DeleteCitation is a list, and PMID is a list
+        self.assertEqual(records[0]["DeleteCitation"][0]["PMID"][0], "99")
+        self.assertEqual(records[1]["MedlineCitation"]["PMID"][0], "100")
+        self.assertEqual(records[2]["DeleteCitation"][0]["PMID"][0], "98")
