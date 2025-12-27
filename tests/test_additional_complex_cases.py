@@ -141,8 +141,8 @@ class TestAdditionalComplexCases(unittest.TestCase):
         Simulate processing a stream with multiple records to ensure the iterator works correctly over time.
         """
         # Create a repeated XML structure
-        single_record = b'<MedlineCitation><PMID>1</PMID></MedlineCitation>'
-        xml_content = b'<PubmedArticleSet>' + (single_record * 100) + b'</PubmedArticleSet>'
+        single_record = b"<MedlineCitation><PMID>1</PMID></MedlineCitation>"
+        xml_content = b"<PubmedArticleSet>" + (single_record * 100) + b"</PubmedArticleSet>"
 
         stream = BytesIO(xml_content)
         records_iter = parse_pubmed_xml(stream)
@@ -156,7 +156,8 @@ class TestAdditionalComplexCases(unittest.TestCase):
 
     def test_attributes_collision(self) -> None:
         """
-        Verify handling of attributes that share names with child tags (though unlikely in valid XML without namespaces).
+        Verify handling of attributes that share names with child tags.
+        (though unlikely in valid XML without namespaces).
         xmltodict prefixes attributes with '@', so collision is avoided.
         """
         xml_content = b"""
