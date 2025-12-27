@@ -17,6 +17,10 @@ clean-targets:         # directories to be removed by 'dbt clean'
   - "target"
   - "dbt_packages"
 
+# Ensure uuid-ossp is enabled for uuid_generate_v5
+on-run-start:
+  - "create extension if not exists \"uuid-ossp\""
+
 models:
   coreason_etl_pubmedabstracts:
     # Configured via Medallion Architecture
