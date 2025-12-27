@@ -51,6 +51,15 @@ parsed as (
         -- Language
         raw_data -> 'MedlineCitation' -> 'Article' -> 'Language' as languages,
 
+        -- DOI Extraction
+        -- ELocationID is forced as a list. We search for the element with EIdType="doi".
+        (
+            select item ->> '#text'
+            from jsonb_array_elements(raw_data -> 'MedlineCitation' -> 'Article' -> 'ELocationID') as item
+            where item ->> '@EIdType' = 'doi'
+            limit 1
+        ) as doi,
+
         'upsert' as operation
 
     from source

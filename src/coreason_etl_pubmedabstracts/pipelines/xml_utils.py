@@ -54,19 +54,25 @@ def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
         Dictionary representations of the XML elements.
     """
     # iterparse events: 'end' is sufficient for complete elements.
-    context = etree.iterparse(file_stream, events=("end",), tag=["MedlineCitation", "DeleteCitation"])
+    # We do not filter by tag in iterparse arguments to handle namespaces robustly.
+    context = etree.iterparse(file_stream, events=("end",))
 
     for _event, elem in context:
-        # Convert the lxml element to a string
-        xml_str = etree.tostring(elem, encoding="unicode")
+        # Strip namespace to check the tag name
+        # lxml tags are like "{http://namespace}TagName" or just "TagName"
+        tag_name = etree.QName(elem).localname
 
-        # Parse with xmltodict, forcing specific keys to be lists
-        doc = xmltodict.parse(xml_str, force_list=FORCE_LIST_KEYS)
+        if tag_name in ("MedlineCitation", "DeleteCitation"):
+            # Convert the lxml element to a string
+            xml_str = etree.tostring(elem, encoding="unicode")
 
-        yield doc
+            # Parse with xmltodict, forcing specific keys to be lists
+            doc = xmltodict.parse(xml_str, force_list=FORCE_LIST_KEYS)
 
-        # Important: Clear the element to save memory
-        elem.clear()
-        # Also clear the references to previous siblings from the root
-        while elem.getprevious() is not None:
-            del elem.getparent()[0]
+            yield doc
+
+            # Important: Clear the element to save memory
+            elem.clear()
+            # Also clear the references to previous siblings from the root
+            while elem.getprevious() is not None:
+                del elem.getparent()[0]

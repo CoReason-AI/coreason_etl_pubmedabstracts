@@ -40,6 +40,7 @@ final as (
 
         -- Pass through extracted columns
         title,
+        doi,
         abstract_text,
         pub_year,
         authors,

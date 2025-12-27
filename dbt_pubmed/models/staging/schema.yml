@@ -1,0 +1,49 @@
+version: 2
+
+models:
+  - name: stg_pubmed_baseline
+    description: "Staged view of the Pubmed Baseline (historical) data."
+    columns:
+      - name: pmid
+        description: "The PubMed ID (unique identifier)."
+        tests:
+          - not_null
+      - name: doi
+        description: "The Digital Object Identifier (DOI) of the article, extracted from ELocationID."
+
+  - name: stg_pubmed_updates
+    description: "Staged view of the Pubmed Daily Updates."
+    columns:
+      - name: pmid
+        description: "The PubMed ID."
+        tests:
+          - not_null
+      - name: doi
+        description: "The Digital Object Identifier (DOI) of the article."
+
+  - name: int_pubmed_deduped
+    description: "Deduplicated view combining Baseline and Updates. Uses window functions to pick the latest version."
+    columns:
+      - name: source_id
+        description: "The PMID."
+        tests:
+          - unique
+          - not_null
+      - name: coreason_id
+        description: "Deterministic UUID v5 generated from the PMID."
+        tests:
+          - unique
+          - not_null
+      - name: doi
+        description: "The DOI of the article."
+
+  - name: gold_pubmed_knowledge
+    description: "The final Gold layer table partitioned by year."
+    columns:
+      - name: source_id
+        description: "The PMID."
+        tests:
+          - unique
+          - not_null
+      - name: doi
+        description: "The DOI of the article."

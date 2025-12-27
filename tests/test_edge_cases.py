@@ -69,12 +69,9 @@ class TestEdgeCases(unittest.TestCase):
         # If it fails to find the tag, it yields nothing.
         records = list(parse_pubmed_xml(stream))
 
-        # Expecting failure to match simple "MedlineCitation" against "{...}MedlineCitation"
-        # If we want to support namespaces, we should probably remove the `tag` filter or make it namespace-aware.
-        # For now, let's assert what currently happens (likely 0 records)
-        # or update code if requirement implies namespace support.
-        # Assuming current code is strict.
-        self.assertEqual(len(records), 0)
+        # Updated expectation: The parser is now namespace-agnostic and should successfully parse
+        # the record despite the namespace prefix.
+        self.assertEqual(len(records), 1)
 
     def test_root_attributes_preservation(self) -> None:
         """
