@@ -10,7 +10,6 @@
 
 import unittest
 from io import BytesIO
-from typing import Any, Dict, List
 
 from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
 
