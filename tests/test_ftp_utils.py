@@ -11,7 +11,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from coreason_etl_pubmedabstracts.pipelines.ftp_utils import list_remote_files
+from coreason_etl_pubmedabstracts.pipelines.ftp_utils import list_remote_files, open_remote_file
 
 
 class TestFtpUtils(unittest.TestCase):
@@ -52,3 +52,19 @@ class TestFtpUtils(unittest.TestCase):
 
         result = list_remote_files("host", "dir")
         self.assertEqual(result, [])
+
+    @patch("coreason_etl_pubmedabstracts.pipelines.ftp_utils.fsspec")
+    def test_open_remote_file(self, mock_fsspec: MagicMock) -> None:
+        mock_fs = MagicMock()
+        mock_fsspec.filesystem.return_value = mock_fs
+
+        # Mock file object
+        mock_file = MagicMock()
+        mock_fs.open.return_value = mock_file
+
+        result = open_remote_file("host", "/path/to/file.xml.gz")
+
+        mock_fsspec.filesystem.assert_called_with("ftp", host="host", user="anonymous", password="")
+        mock_fs.open.assert_called_with("/path/to/file.xml.gz", mode="rb", compression="infer")
+
+        self.assertEqual(result, mock_file)

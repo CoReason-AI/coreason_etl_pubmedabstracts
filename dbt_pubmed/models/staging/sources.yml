@@ -1,0 +1,14 @@
+version: 2
+
+sources:
+  - name: bronze
+    description: "Raw data from dlt pipeline"
+    schema: public
+    tables:
+      - name: bronze_pubmed_raw
+        description: "Raw PubMed XML records stored as JSONB"
+        columns:
+          - name: file_name
+          - name: ingestion_ts
+          - name: content_hash
+          - name: raw_data

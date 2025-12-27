@@ -8,7 +8,7 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
-from typing import List
+from typing import IO, Any, List, cast
 
 import fsspec
 
@@ -36,3 +36,22 @@ def list_remote_files(host: str, directory: str, pattern: str = "*.xml.gz") -> L
 
     # Sort to ensure deterministic order (important for updates)
     return sorted(files)
+
+
+def open_remote_file(host: str, full_path: str) -> IO[Any]:
+    """
+    Open a remote file for streaming (reading).
+    Handles gzip compression automatically if the file extension ends in .gz.
+
+    Args:
+        host: The FTP host.
+        full_path: The full path to the file on the FTP server.
+
+    Returns:
+        A file-like object compatible with read().
+    """
+    fs = fsspec.filesystem("ftp", host=host, user="anonymous", password="")
+
+    # compression='infer' is default in open(), but we can be explicit if needed.
+    # fsspec usually infers from extension.
+    return cast(IO[Any], fs.open(full_path, mode="rb", compression="infer"))
