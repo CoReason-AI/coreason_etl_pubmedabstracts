@@ -46,5 +46,6 @@ class TestDeduplication(unittest.TestCase):
         # Simulate an DB error
         mock_client.execute_sql.side_effect = Exception("DB Connection Failed")
 
-        with self.assertRaises(Exception):
+        # Use assertRaisesRegex to satisfy B017 and verify the specific error
+        with self.assertRaisesRegex(Exception, "DB Connection Failed"):
             run_deduplication_sweep(mock_pipeline)

@@ -11,9 +11,8 @@
 import unittest
 from io import BytesIO
 
-from lxml import etree
-
 from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
+from lxml import etree
 
 
 class TestEdgeCases(unittest.TestCase):

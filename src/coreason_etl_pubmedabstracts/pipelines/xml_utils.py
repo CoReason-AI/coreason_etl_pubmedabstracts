@@ -54,19 +54,14 @@ def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
         Dictionary representations of the XML elements.
     """
     # iterparse events: 'end' is sufficient for complete elements.
-    context = etree.iterparse(
-        file_stream, events=("end",), tag=["MedlineCitation", "DeleteCitation"]
-    )
+    context = etree.iterparse(file_stream, events=("end",), tag=["MedlineCitation", "DeleteCitation"])
 
     for _event, elem in context:
         # Convert the lxml element to a string
         xml_str = etree.tostring(elem, encoding="unicode")
 
         # Parse with xmltodict, forcing specific keys to be lists
-        doc = xmltodict.parse(
-            xml_str,
-            force_list=FORCE_LIST_KEYS
-        )
+        doc = xmltodict.parse(xml_str, force_list=FORCE_LIST_KEYS)
 
         yield doc
 

@@ -22,7 +22,7 @@ class TestPubmedPipeline(unittest.TestCase):
     @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.open_remote_file")
     @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.parse_pubmed_xml")
     def test_pubmed_baseline_configuration(
-        self, mock_parse, mock_open, mock_list
+        self, mock_parse: MagicMock, mock_open: MagicMock, mock_list: MagicMock
     ) -> None:
         """Test that pubmed_baseline is configured correctly."""
         # Setup mocks
@@ -48,7 +48,7 @@ class TestPubmedPipeline(unittest.TestCase):
     @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.open_remote_file")
     @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.parse_pubmed_xml")
     def test_pubmed_updates_configuration(
-        self, mock_parse, mock_open, mock_list
+        self, mock_parse: MagicMock, mock_open: MagicMock, mock_list: MagicMock
     ) -> None:
         """Test that pubmed_updates is configured correctly."""
         mock_list.return_value = ["/pubmed/updatefiles/pubmed24n1001.xml.gz"]
