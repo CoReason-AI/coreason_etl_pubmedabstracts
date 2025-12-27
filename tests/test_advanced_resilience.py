@@ -95,9 +95,7 @@ class TestAdvancedResilience(unittest.TestCase):
     @patch("coreason_etl_pubmedabstracts.pipelines.xml_utils.etree.QName")
     @patch("coreason_etl_pubmedabstracts.pipelines.xml_utils.etree.iterparse")
     @patch("coreason_etl_pubmedabstracts.pipelines.xml_utils.etree.tostring")
-    def test_memory_clearing(
-        self, mock_tostring: MagicMock, mock_iterparse: MagicMock, mock_qname: MagicMock
-    ) -> None:
+    def test_memory_clearing(self, mock_tostring: MagicMock, mock_iterparse: MagicMock, mock_qname: MagicMock) -> None:
         """
         Verify that elem.clear() and parent cleanup are called to prevent memory leaks.
         """
