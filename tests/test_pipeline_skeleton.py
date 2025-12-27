@@ -9,15 +9,15 @@
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
 import dlt
-from dlt.common.pipeline import PipelineContext
+
 from coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline import pubmed_source
 
 
 def test_dependencies_installed() -> None:
     """Check that key dependencies are importable."""
+    import dlt
     import lxml
     import xmltodict
-    import dlt
 
     assert lxml is not None
     assert xmltodict is not None

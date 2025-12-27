@@ -9,7 +9,9 @@
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
 from typing import List
-import fsspec  # type: ignore
+
+import fsspec
+
 
 def list_remote_files(host: str, directory: str, pattern: str = "*.xml.gz") -> List[str]:
     """

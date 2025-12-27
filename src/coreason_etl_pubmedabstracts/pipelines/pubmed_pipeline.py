@@ -14,7 +14,7 @@ import dlt
 from dlt.sources import DltResource
 
 
-@dlt.source
+@dlt.source  # type: ignore[misc]
 def pubmed_source() -> Iterator[DltResource]:
     """
     The main DLT source for PubMed.
@@ -23,7 +23,7 @@ def pubmed_source() -> Iterator[DltResource]:
     yield pubmed_baseline()
 
 
-@dlt.resource(write_disposition="replace")
+@dlt.resource(write_disposition="replace")  # type: ignore[misc]
 def pubmed_baseline() -> Iterator[dict[str, str]]:
     """
     A placeholder resource for PubMed Baseline.

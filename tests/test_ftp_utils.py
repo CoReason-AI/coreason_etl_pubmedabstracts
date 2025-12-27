@@ -10,6 +10,7 @@
 
 import unittest
 from unittest.mock import MagicMock, patch
+
 from coreason_etl_pubmedabstracts.pipelines.ftp_utils import list_remote_files
 
 
@@ -28,15 +29,10 @@ class TestFtpUtils(unittest.TestCase):
         ]
 
         # Call the function
-        result = list_remote_files(
-            host="ftp.ncbi.nlm.nih.gov",
-            directory="/pubmed/baseline/"
-        )
+        result = list_remote_files(host="ftp.ncbi.nlm.nih.gov", directory="/pubmed/baseline/")
 
         # Verify fsspec was called correctly
-        mock_fsspec.filesystem.assert_called_with(
-            "ftp", host="ftp.ncbi.nlm.nih.gov", user="anonymous", password=""
-        )
+        mock_fsspec.filesystem.assert_called_with("ftp", host="ftp.ncbi.nlm.nih.gov", user="anonymous", password="")
 
         mock_fs.glob.assert_called_with("/pubmed/baseline/*.xml.gz")
 
