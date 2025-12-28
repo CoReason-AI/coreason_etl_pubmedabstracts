@@ -96,7 +96,7 @@ class TestGoldLogic(unittest.TestCase):
 
     def test_author_flattening(self) -> None:
         # Input Data
-        authors = [
+        authors: List[Dict[str, Any]] = [
             # Case 1: Simple Author
             {
                 "LastName": "Doe",
@@ -159,7 +159,7 @@ class TestGoldLogic(unittest.TestCase):
         return results
 
     def test_mesh_flattening(self) -> None:
-        mesh = [
+        mesh: List[Dict[str, Any]] = [
             # Case 1: Object with UI
             {"DescriptorName": {"#text": "Brain", "@UI": "D001921"}},
             # Case 2: Simple String (unlikely in this XML schema but defensive check)
