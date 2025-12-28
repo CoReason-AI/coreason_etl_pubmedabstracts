@@ -117,10 +117,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
     """
 
     def _simulate_dbt_run(
-        self,
-        current_table: List[Dict[str, Any]],
-        incoming_batch: List[Dict[str, Any]],
-        max_ts_in_table: float
+        self, current_table: List[Dict[str, Any]], incoming_batch: List[Dict[str, Any]], max_ts_in_table: float
     ) -> List[Dict[str, Any]]:
         """
         Simulates the dbt incremental model run:
@@ -145,7 +142,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         # 0. Filter Incoming Batch (Incremental Logic)
         # In SQL: where ingestion_ts > (select max(ingestion_ts) from {{ this }})
         # Note: Ideally main query uses current max ts.
-        new_records = [r for r in incoming_batch if r['ingestion_ts'] > pre_hook_watermark]
+        new_records = [r for r in incoming_batch if r["ingestion_ts"] > pre_hook_watermark]
 
         # If no new records, nothing changes
         if not new_records:
@@ -159,18 +156,18 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
 
         batch_grouped: Dict[str, List[Dict[str, Any]]] = {}
         for r in new_records:
-            pmid = str(r['pmid'])
+            pmid = str(r["pmid"])
             if pmid not in batch_grouped:
                 batch_grouped[pmid] = []
             batch_grouped[pmid].append(r)
 
         upserts_to_apply = []
-        for pmid, rows in batch_grouped.items():
+        for _pmid, rows in batch_grouped.items():
             # Rank: file_name desc, ingestion_ts desc
-            rows.sort(key=lambda x: (x.get('file_name', ''), x['ingestion_ts']), reverse=True)
+            rows.sort(key=lambda x: (x.get("file_name", ""), x["ingestion_ts"]), reverse=True)
             winner = rows[0]
 
-            if winner['operation'] == 'upsert':
+            if winner["operation"] == "upsert":
                 upserts_to_apply.append(winner)
 
         # ---------------------------------------------------------
@@ -178,17 +175,17 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         # ---------------------------------------------------------
         # In dbt incremental (unique_key='source_id'), this updates existing or inserts new.
 
-        table_map = {str(r['source_id']): r for r in current_table}
+        table_map = {str(r["source_id"]): r for r in current_table}
 
         for up in upserts_to_apply:
             target_record = {
-                'source_id': str(up['pmid']),
-                'ingestion_ts': up['ingestion_ts'],
-                'file_name': up.get('file_name', ''),
-                'title': up.get('title', 'Updated Title'),
+                "source_id": str(up["pmid"]),
+                "ingestion_ts": up["ingestion_ts"],
+                "file_name": up.get("file_name", ""),
+                "title": up.get("title", "Updated Title"),
                 # ... other fields
             }
-            table_map[target_record['source_id']] = target_record
+            table_map[target_record["source_id"]] = target_record
 
         # ---------------------------------------------------------
         # Step 3: Post-Hook Logic (Physical Delete)
@@ -198,14 +195,14 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         ids_to_delete = set()
         for pmid, rows in batch_grouped.items():
             # Same ranking logic as above
-            rows.sort(key=lambda x: (x.get('file_name', ''), x['ingestion_ts']), reverse=True)
+            rows.sort(key=lambda x: (x.get("file_name", ""), x["ingestion_ts"]), reverse=True)
             winner = rows[0]
 
             # Key check: Ensure we are processing the SAME batch as the main query
             # The filter logic in post-hook must match the filter logic in main query or better.
             # Using pre_hook_watermark ensures we see the deletes that came in this batch.
 
-            if winner['operation'] == 'delete':
+            if winner["operation"] == "delete":
                 ids_to_delete.add(pmid)
 
         # Apply Deletes
@@ -218,25 +215,23 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
 
     def test_upsert_logic(self) -> None:
         """Verify standard upsert behavior."""
-        current = [{'source_id': '1', 'ingestion_ts': 100.0, 'title': 'Old'}]
+        current = [{"source_id": "1", "ingestion_ts": 100.0, "title": "Old"}]
         batch = [
-            {'pmid': '1', 'operation': 'upsert', 'ingestion_ts': 110.0, 'file_name': 'f2', 'title': 'New'},
-            {'pmid': '2', 'operation': 'upsert', 'ingestion_ts': 110.0, 'file_name': 'f2', 'title': 'Fresh'}
+            {"pmid": "1", "operation": "upsert", "ingestion_ts": 110.0, "file_name": "f2", "title": "New"},
+            {"pmid": "2", "operation": "upsert", "ingestion_ts": 110.0, "file_name": "f2", "title": "Fresh"},
         ]
 
         result = self._simulate_dbt_run(current, batch, max_ts_in_table=105.0)
 
         self.assertEqual(len(result), 2)
-        res_map = {r['source_id']: r for r in result}
-        self.assertEqual(res_map['1']['title'], 'New')
-        self.assertEqual(res_map['2']['title'], 'Fresh')
+        res_map = {r["source_id"]: r for r in result}
+        self.assertEqual(res_map["1"]["title"], "New")
+        self.assertEqual(res_map["2"]["title"], "Fresh")
 
     def test_delete_existing(self) -> None:
         """Verify delete removes an existing record."""
-        current = [{'source_id': '1', 'ingestion_ts': 100.0, 'title': 'To Delete'}]
-        batch = [
-            {'pmid': '1', 'operation': 'delete', 'ingestion_ts': 110.0, 'file_name': 'f2'}
-        ]
+        current = [{"source_id": "1", "ingestion_ts": 100.0, "title": "To Delete"}]
+        batch = [{"pmid": "1", "operation": "delete", "ingestion_ts": 110.0, "file_name": "f2"}]
 
         result = self._simulate_dbt_run(current, batch, max_ts_in_table=105.0)
         self.assertEqual(len(result), 0)
@@ -246,10 +241,10 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         Verify that if a batch contains Delete then Upsert (Upsert is later),
         the record survives.
         """
-        current = [{'source_id': '1', 'ingestion_ts': 100.0}]
+        current = [{"source_id": "1", "ingestion_ts": 100.0}]
         batch = [
-            {'pmid': '1', 'operation': 'delete', 'ingestion_ts': 110.0, 'file_name': 'f2'},
-            {'pmid': '1', 'operation': 'upsert', 'ingestion_ts': 111.0, 'file_name': 'f2'}
+            {"pmid": "1", "operation": "delete", "ingestion_ts": 110.0, "file_name": "f2"},
+            {"pmid": "1", "operation": "upsert", "ingestion_ts": 111.0, "file_name": "f2"},
         ]
 
         # Max TS is 105. Both are new.
@@ -259,17 +254,17 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
 
         result = self._simulate_dbt_run(current, batch, max_ts_in_table=105.0)
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['ingestion_ts'], 111.0)
+        self.assertEqual(result[0]["ingestion_ts"], 111.0)
 
     def test_upsert_then_delete_in_batch(self) -> None:
         """
         Verify that if a batch contains Upsert then Delete (Delete is later),
         the record is removed.
         """
-        current = []
+        current: List[Dict[str, Any]] = []
         batch = [
-            {'pmid': '1', 'operation': 'upsert', 'ingestion_ts': 110.0, 'file_name': 'f2'},
-            {'pmid': '1', 'operation': 'delete', 'ingestion_ts': 111.0, 'file_name': 'f2'}
+            {"pmid": "1", "operation": "upsert", "ingestion_ts": 110.0, "file_name": "f2"},
+            {"pmid": "1", "operation": "delete", "ingestion_ts": 111.0, "file_name": "f2"},
         ]
 
         # Winner is ts=111 (Delete).
@@ -282,12 +277,10 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
 
     def test_stale_update_ignored(self) -> None:
         """Verify that records older than watermark are ignored."""
-        current = [{'source_id': '1', 'ingestion_ts': 100.0}]
-        batch = [
-            {'pmid': '1', 'operation': 'delete', 'ingestion_ts': 90.0, 'file_name': 'f1'}
-        ]
+        current = [{"source_id": "1", "ingestion_ts": 100.0}]
+        batch = [{"pmid": "1", "operation": "delete", "ingestion_ts": 90.0, "file_name": "f1"}]
 
         result = self._simulate_dbt_run(current, batch, max_ts_in_table=95.0)
         # Batch ignored. Table remains.
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['source_id'], '1')
+        self.assertEqual(result[0]["source_id"], "1")
