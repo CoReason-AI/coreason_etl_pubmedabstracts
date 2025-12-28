@@ -284,3 +284,81 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         # Batch ignored. Table remains.
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["source_id"], "1")
+
+    def test_complex_sequence_in_batch(self) -> None:
+        """
+        Verify complex sequence: Upsert -> Delete -> Upsert -> Delete.
+        Latest is Delete, so record should be removed.
+        """
+        current: List[Dict[str, Any]] = []
+        batch = [
+            {"pmid": "1", "operation": "upsert", "ingestion_ts": 110.0, "file_name": "f2"},
+            {"pmid": "1", "operation": "delete", "ingestion_ts": 111.0, "file_name": "f2"},
+            {"pmid": "1", "operation": "upsert", "ingestion_ts": 112.0, "file_name": "f2"},
+            {"pmid": "1", "operation": "delete", "ingestion_ts": 113.0, "file_name": "f2"},
+        ]
+        result = self._simulate_dbt_run(current, batch, max_ts_in_table=100.0)
+        self.assertEqual(len(result), 0)
+
+    def test_watermark_boundary(self) -> None:
+        """
+        Verify strict inequality for watermark logic (ingestion_ts > max_ts).
+        Record with ts equal to watermark should be ignored.
+        """
+        current = [{"source_id": "1", "ingestion_ts": 100.0}]
+        batch = [
+            # Equal to watermark: should be ignored
+            {"pmid": "1", "operation": "delete", "ingestion_ts": 100.0, "file_name": "f2"},
+            # Greater than watermark: should be processed
+            {"pmid": "2", "operation": "upsert", "ingestion_ts": 101.0, "file_name": "f2"},
+        ]
+        result = self._simulate_dbt_run(current, batch, max_ts_in_table=100.0)
+        # 1 remains (delete ignored), 2 added
+        self.assertEqual(len(result), 2)
+        res_map = {r["source_id"]: r for r in result}
+        self.assertEqual(res_map["1"]["ingestion_ts"], 100.0)
+        self.assertEqual(res_map["2"]["ingestion_ts"], 101.0)
+
+    def test_tie_breaking_same_ts(self) -> None:
+        """
+        Verify tie-breaking using filename when ingestion_ts is identical.
+        File names sort alphanumerically: 'pub24n0002' > 'pub24n0001'.
+        """
+        current: List[Dict[str, Any]] = []
+        batch = [
+            # Older file (lexicographically)
+            {"pmid": "1", "operation": "delete", "ingestion_ts": 110.0, "file_name": "pub24n0001"},
+            # Newer file (lexicographically)
+            {"pmid": "1", "operation": "upsert", "ingestion_ts": 110.0, "file_name": "pub24n0002"},
+        ]
+        # Winner should be 'upsert' from pub24n0002
+        result = self._simulate_dbt_run(current, batch, max_ts_in_table=100.0)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["file_name"], "pub24n0002")
+
+    def test_large_mixed_batch(self) -> None:
+        """
+        Verify performance and correctness on a larger mixed batch.
+        """
+        current = [{"source_id": str(i), "ingestion_ts": 100.0} for i in range(100)]
+        batch = []
+        # Update first 50
+        for i in range(50):
+            batch.append({"pmid": str(i), "operation": "upsert", "ingestion_ts": 110.0, "file_name": "f2"})
+        # Delete next 50
+        for i in range(50, 100):
+            batch.append({"pmid": str(i), "operation": "delete", "ingestion_ts": 110.0, "file_name": "f2"})
+        # Add 50 new
+        for i in range(100, 150):
+            batch.append({"pmid": str(i), "operation": "upsert", "ingestion_ts": 110.0, "file_name": "f2"})
+
+        result = self._simulate_dbt_run(current, batch, max_ts_in_table=105.0)
+
+        self.assertEqual(len(result), 100) # 50 updated + 50 new
+        res_map = {r["source_id"]: r for r in result}
+        # Check an updated one
+        self.assertEqual(res_map["0"]["ingestion_ts"], 110.0)
+        # Check a deleted one (should not exist)
+        self.assertNotIn("50", res_map)
+        # Check a new one
+        self.assertIn("100", res_map)
