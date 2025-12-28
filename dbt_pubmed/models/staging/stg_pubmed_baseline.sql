@@ -39,7 +39,11 @@ parsed as (
         end as abstract_text,
 
         -- Publication Year
-        raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'Year' as pub_year,
+        -- Fallback to regex extraction from MedlineDate if Year is missing
+        coalesce(
+            raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'Year',
+            substring(raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'MedlineDate' from '\d{4}')
+        ) as pub_year,
 
         -- Authors (Already normalized to list in Python)
         -- Path: Article -> AuthorList -> Author
@@ -53,9 +57,10 @@ parsed as (
 
         -- DOI Extraction
         -- ELocationID is forced as a list. We search for the element with EIdType="doi".
+        -- Coalesce to empty array to handle cases where ELocationID is missing.
         (
             select item ->> '#text'
-            from jsonb_array_elements(raw_data -> 'MedlineCitation' -> 'Article' -> 'ELocationID') as item
+            from jsonb_array_elements(coalesce(raw_data -> 'MedlineCitation' -> 'Article' -> 'ELocationID', '[]'::jsonb)) as item
             where item ->> '@EIdType' = 'doi'
             limit 1
         ) as doi,

@@ -36,7 +36,10 @@ upserts as (
         end as abstract_text,
 
         -- Publication Year
-        raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'Year' as pub_year,
+        coalesce(
+            raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'Year',
+            substring(raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'MedlineDate' from '\d{4}')
+        ) as pub_year,
 
         -- Authors
         raw_data -> 'MedlineCitation' -> 'Article' -> 'AuthorList' -> 'Author' as authors,
@@ -50,7 +53,7 @@ upserts as (
         -- DOI Extraction
         (
             select item ->> '#text'
-            from jsonb_array_elements(raw_data -> 'MedlineCitation' -> 'Article' -> 'ELocationID') as item
+            from jsonb_array_elements(coalesce(raw_data -> 'MedlineCitation' -> 'Article' -> 'ELocationID', '[]'::jsonb)) as item
             where item ->> '@EIdType' = 'doi'
             limit 1
         ) as doi,

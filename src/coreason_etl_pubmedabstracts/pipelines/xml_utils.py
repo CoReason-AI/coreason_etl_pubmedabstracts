@@ -63,6 +63,14 @@ def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
         tag_name = etree.QName(elem).localname
 
         if tag_name in ("MedlineCitation", "DeleteCitation"):
+            # Flatten mixed content in specific text-heavy fields
+            # This prevents xmltodict from splitting text due to internal tags like <i>, <b>, <sup>.
+            # We strip child tags but preserve their text content.
+            for tag in ("ArticleTitle", "AbstractText", "VernacularTitle", "Affiliation"):
+                for node in elem.findall(f".//{tag}"):
+                    # Strip all child tags (preserving text)
+                    etree.strip_tags(node, "*")
+
             # Convert the lxml element to a string
             xml_str = etree.tostring(elem, encoding="unicode")
 
