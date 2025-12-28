@@ -27,7 +27,7 @@
                             operation,
                             -- Rank to find the latest operation for this PMID in the batch
                             row_number() over (partition by pmid order by file_name desc, ingestion_ts desc) as rn
-                        from {{ ref('stg_pubmed_updates') }}
+                        from {{ ref('stg_pubmed_citations') }}
                         where ingestion_ts > (select max_ts from pubmed_deduped_watermark)
                     ) s
                     where rn = 1 and operation = 'delete'
@@ -40,26 +40,12 @@
     )
 }}
 
-with baseline as (
-    select * from {{ ref('stg_pubmed_baseline') }}
+with source_data as (
+    select * from {{ ref('stg_pubmed_citations') }}
     {% if is_incremental() %}
-    -- Optimization: Only scan baseline if needed (usually baseline is write-once/replace, but for safety)
+    -- Optimization: Only scan new records
     where ingestion_ts > (select max_ts from pubmed_deduped_watermark)
     {% endif %}
-),
-
-updates as (
-    select * from {{ ref('stg_pubmed_updates') }}
-    {% if is_incremental() %}
-    -- Only process new updates
-    where ingestion_ts > (select max_ts from pubmed_deduped_watermark)
-    {% endif %}
-),
-
-combined as (
-    select * from baseline
-    union all
-    select * from updates
 ),
 
 ranked as (
@@ -69,7 +55,7 @@ ranked as (
         -- Files are named like pubmed24n0001.xml.gz, pubmed24n1001.xml.gz
         -- Higher number = later.
         row_number() over (partition by pmid order by file_name desc, ingestion_ts desc) as rn
-    from combined
+    from source_data
     where pmid is not null
 ),
 
