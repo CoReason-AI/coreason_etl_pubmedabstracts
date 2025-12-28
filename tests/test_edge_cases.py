@@ -48,7 +48,7 @@ class TestEdgeCases(unittest.TestCase):
         """
         stream = BytesIO(b"")
         with self.assertRaises(etree.XMLSyntaxError):
-             list(parse_pubmed_xml(stream))
+            list(parse_pubmed_xml(stream))
 
     def test_namespaces(self) -> None:
         """
