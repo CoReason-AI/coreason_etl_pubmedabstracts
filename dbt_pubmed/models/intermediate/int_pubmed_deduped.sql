@@ -1,15 +1,46 @@
 {{
     config(
-        materialized='view'
+        materialized='incremental',
+        unique_key='source_id',
+        pre_hook="""
+            {% if is_incremental() %}
+                create temporary table if not exists pubmed_deduped_watermark as
+                select coalesce(max(ingestion_ts), 0) as max_ts from {{ this }};
+            {% endif %}
+        """,
+        post_hook="""
+            {% if is_incremental() %}
+                delete from {{ this }}
+                where source_id in (
+                    select pmid
+                    from (
+                        select
+                            pmid,
+                            operation,
+                            row_number() over (partition by pmid order by file_name desc, ingestion_ts desc) as rn
+                        from {{ ref('stg_pubmed_updates') }}
+                        where ingestion_ts > (select max_ts from pubmed_deduped_watermark)
+                    ) s
+                    where rn = 1 and operation = 'delete'
+                );
+                drop table if exists pubmed_deduped_watermark;
+            {% endif %}
+        """
     )
 }}
 
 with baseline as (
     select * from {{ ref('stg_pubmed_baseline') }}
+    {% if is_incremental() %}
+    where ingestion_ts > (select max_ts from pubmed_deduped_watermark)
+    {% endif %}
 ),
 
 updates as (
     select * from {{ ref('stg_pubmed_updates') }}
+    {% if is_incremental() %}
+    where ingestion_ts > (select max_ts from pubmed_deduped_watermark)
+    {% endif %}
 ),
 
 combined as (
