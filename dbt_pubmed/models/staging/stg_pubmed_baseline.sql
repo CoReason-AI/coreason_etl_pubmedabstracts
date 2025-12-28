@@ -63,6 +63,7 @@ parsed as (
         'upsert' as operation
 
     from source
+    where raw_data ->> '_record_type' = 'citation'
 )
 
 select * from parsed
