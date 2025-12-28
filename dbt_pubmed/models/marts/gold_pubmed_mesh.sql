@@ -26,6 +26,26 @@ final as (
         coreason_id,
         source_id,
 
+        -- Generate deterministic MeSH ID
+        -- Priority: Descriptor UI (Stable) > Descriptor Name (Fallback)
+        -- Using DNS namespace: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+        uuid_generate_v5(
+            '6ba7b810-9dad-11d1-80b4-00c04fd430c8'::uuid,
+            coalesce(
+                case
+                    when jsonb_typeof(mesh_json -> 'DescriptorName') = 'object' then
+                        mesh_json -> 'DescriptorName' ->> '@UI'
+                    else null
+                end,
+                case
+                    when jsonb_typeof(mesh_json -> 'DescriptorName') = 'object' then
+                        mesh_json -> 'DescriptorName' ->> '#text'
+                    else
+                        mesh_json ->> 'DescriptorName'
+                end
+            )
+        ) as mesh_id,
+
         -- DescriptorName
         case
              when jsonb_typeof(mesh_json -> 'DescriptorName') = 'object' then
