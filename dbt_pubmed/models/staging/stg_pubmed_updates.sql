@@ -61,7 +61,7 @@ upserts as (
         'upsert' as operation,
         raw_data
     from source
-    where raw_data ? 'MedlineCitation'
+    where raw_data ->> '_record_type' = 'citation'
 ),
 
 -- Handle Deletes (DeleteCitation)
@@ -87,10 +87,12 @@ deletes as (
         null::jsonb as raw_data
     from source,
     -- Explode DeleteCitation list (usually one item but strictly it's a list)
-    jsonb_array_elements(raw_data -> 'DeleteCitation') as dc_obj,
+    -- Use coalesce to prevent errors if DeleteCitation is missing in non-delete records
+    jsonb_array_elements(coalesce(raw_data -> 'DeleteCitation', '[]'::jsonb)) as dc_obj,
     -- Explode PMID list inside the DeleteCitation object
-    jsonb_array_elements(dc_obj -> 'PMID') as pmid_elem
-    where raw_data ? 'DeleteCitation'
+    -- Use coalesce for safety, though nested structure implies existence if parent exists
+    jsonb_array_elements(coalesce(dc_obj -> 'PMID', '[]'::jsonb)) as pmid_elem
+    where raw_data ->> '_record_type' = 'delete'
 ),
 
 combined as (
