@@ -286,13 +286,15 @@ class TestXmlUtils(unittest.TestCase):
 
         stream = NonSeekableStream(b"")
         # Explicitly cast to IO[bytes] because our mock is simple
-        from typing import cast
-        from typing import IO
+        from typing import IO, cast
+
         records = list(parse_pubmed_xml(cast(IO[bytes], stream)))
         self.assertEqual(records, [])
 
     def test_non_seekable_malformed_xml(self) -> None:
         """Test that a non-seekable malformed stream still raises XMLSyntaxError."""
+        from typing import IO, cast
+
         from lxml import etree
 
         class NonSeekableStream:
@@ -306,7 +308,5 @@ class TestXmlUtils(unittest.TestCase):
                 return False
 
         stream = NonSeekableStream(b"<root>unclosed")
-        from typing import cast
-        from typing import IO
         with self.assertRaises(etree.XMLSyntaxError):
             list(parse_pubmed_xml(cast(IO[bytes], stream)))
