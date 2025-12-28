@@ -10,8 +10,11 @@
 
 import unittest
 from io import BytesIO
+
 from lxml import etree
+
 from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
+
 
 class TestComplexXmlCases(unittest.TestCase):
     def test_empty_stream(self) -> None:
@@ -67,7 +70,8 @@ class TestComplexXmlCases(unittest.TestCase):
 
         author = records[0]["MedlineCitation"]["Article"]["AuthorList"]["Author"][0]
         # xmltodict behavior for empty tag with attributes: {'@ValidYN': 'Y', '#text': None} or similar?
-        # Actually usually checks if #text is present. If self-closing <Tag Attr="Val" />, it might be just {'@Attr': 'Val'}.
+        # Actually usually checks if #text is present. If self-closing <Tag Attr="Val" />,
+        # it might be just {'@Attr': 'Val'}.
         self.assertEqual(author["@ValidYN"], "Y")
         self.assertIsNone(author.get("#text"))
 
@@ -130,7 +134,7 @@ class TestComplexXmlCases(unittest.TestCase):
         # Filter out _record_type
         xml_keys = [k for k in keys if k != "_record_type"]
         self.assertTrue(len(xml_keys) > 0)
-        self.assertTrue("MedlineCitation" in xml_keys[0]) # Should contain the tag name at least
+        self.assertTrue("MedlineCitation" in xml_keys[0])  # Should contain the tag name at least
 
     def test_polymorphism_non_forced_keys(self) -> None:
         """
