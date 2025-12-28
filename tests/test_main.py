@@ -28,9 +28,7 @@ class TestMainOrchestration(unittest.TestCase):
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
     @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
-    def test_run_pipeline_all(
-        self, mock_source: MagicMock, mock_sweep: MagicMock, mock_pipeline: MagicMock
-    ) -> None:
+    def test_run_pipeline_all(self, mock_source: MagicMock, mock_sweep: MagicMock, mock_pipeline: MagicMock) -> None:
         """Test running all resources triggers sweep."""
         # Setup mock pipeline
         mock_p_instance = MagicMock()

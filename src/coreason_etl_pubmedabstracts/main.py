@@ -20,9 +20,7 @@ from coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline import pubmed_source
 
 
 def get_args(args: Optional[List[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Coreason ETL PubMed Abstracts Pipeline"
-    )
+    parser = argparse.ArgumentParser(description="Coreason ETL PubMed Abstracts Pipeline")
     parser.add_argument(
         "--load",
         choices=["baseline", "updates", "all"],
@@ -97,7 +95,7 @@ def main() -> None:
     args = get_args()
     try:
         run_pipeline(args.load, args.dry_run)
-    except Exception as e:
+    except Exception:
         logger.exception("Pipeline execution failed")
         sys.exit(1)
 
