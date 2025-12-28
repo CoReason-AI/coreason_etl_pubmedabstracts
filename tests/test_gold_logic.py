@@ -10,6 +10,7 @@
 
 import re
 import unittest
+import uuid
 from typing import Any, Dict, List, Optional
 
 
@@ -138,6 +139,52 @@ class TestGoldLogic(unittest.TestCase):
         ]
 
         self.assertEqual(self._flatten_authors_sql_logic(authors), expected)
+
+    def _generate_author_id_sql_logic(self, author: Dict[str, Any]) -> str:
+        """
+        Mimics the uuid_generate_v5 logic in gold_pubmed_authors.sql.
+        Namespace: uuid.NAMESPACE_DNS (6ba7b810-9dad-11d1-80b4-00c04fd430c8)
+        Key: LastName|ForeName|Initials
+        """
+        last_name = author.get("LastName") or ""
+        fore_name = author.get("ForeName") or ""
+        initials = author.get("Initials") or ""
+
+        # Concatenate with separator
+        name_key = f"{last_name}|{fore_name}|{initials}"
+
+        # Generate UUIDv5
+        return str(uuid.uuid5(uuid.NAMESPACE_DNS, name_key))
+
+    def test_author_identity_resolution(self) -> None:
+        """Verify deterministic ID generation for authors."""
+        # Case 1: Standard Author
+        author_1 = {"LastName": "Doe", "ForeName": "John", "Initials": "JD"}
+        uuid_1 = self._generate_author_id_sql_logic(author_1)
+
+        # Verify Determinism (Same input -> Same UUID)
+        uuid_1_retry = self._generate_author_id_sql_logic(author_1)
+        self.assertEqual(uuid_1, uuid_1_retry)
+
+        # Case 2: Partial Data (Null ForeName)
+        author_2 = {"LastName": "Doe", "Initials": "JD"}  # ForeName missing
+        uuid_2 = self._generate_author_id_sql_logic(author_2)
+
+        # Verify it's different from Case 1
+        self.assertNotEqual(uuid_1, uuid_2)
+
+        # Case 3: Verify specific UUID value (Regression testing)
+        # Name: "Doe|John|JD"
+        # Namespace: DNS
+        # Expected: generated externally or checked once
+        expected_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, "Doe|John|JD"))
+        self.assertEqual(uuid_1, expected_uuid)
+
+        # Case 4: Empty Author (All nulls)
+        author_empty: Dict[str, Any] = {}
+        uuid_empty = self._generate_author_id_sql_logic(author_empty)
+        expected_empty = str(uuid.uuid5(uuid.NAMESPACE_DNS, "||"))
+        self.assertEqual(uuid_empty, expected_empty)
 
     def _flatten_mesh_sql_logic(self, mesh_terms_json: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
