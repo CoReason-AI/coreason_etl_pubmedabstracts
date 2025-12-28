@@ -354,7 +354,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
 
         result = self._simulate_dbt_run(current, batch, max_ts_in_table=105.0)
 
-        self.assertEqual(len(result), 100) # 50 updated + 50 new
+        self.assertEqual(len(result), 100)  # 50 updated + 50 new
         res_map = {r["source_id"]: r for r in result}
         # Check an updated one
         self.assertEqual(res_map["0"]["ingestion_ts"], 110.0)
