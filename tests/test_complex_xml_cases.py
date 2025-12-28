@@ -35,6 +35,9 @@ class TestComplexXmlCases(unittest.TestCase):
         records = list(parse_pubmed_xml(stream))
 
         self.assertEqual(len(records), 1)
+        # Verify _record_type
+        self.assertEqual(records[0]["_record_type"], "citation")
+
         article = records[0]["MedlineCitation"]["Article"]
 
         # Verify ELocationID is a list (enforced by FORCE_LIST_KEYS)
@@ -64,6 +67,7 @@ class TestComplexXmlCases(unittest.TestCase):
         stream = BytesIO(xml_content)
         records = list(parse_pubmed_xml(stream))
 
+        self.assertEqual(records[0]["_record_type"], "citation")
         elocation = records[0]["MedlineCitation"]["Article"]["ELocationID"]
         self.assertIsInstance(elocation, list)
         self.assertEqual(len(elocation), 1)
@@ -90,6 +94,7 @@ class TestComplexXmlCases(unittest.TestCase):
         stream = BytesIO(xml_content)
         records = list(parse_pubmed_xml(stream))
 
+        self.assertEqual(records[0]["_record_type"], "citation")
         abstract_texts = records[0]["MedlineCitation"]["Article"]["Abstract"]["AbstractText"]
 
         # Note: AbstractText is NOT in FORCE_LIST_KEYS in the provided file.
@@ -119,6 +124,7 @@ class TestComplexXmlCases(unittest.TestCase):
         stream = BytesIO(xml_content)
         records = list(parse_pubmed_xml(stream))
 
+        self.assertEqual(records[0]["_record_type"], "citation")
         title = records[0]["MedlineCitation"]["Article"]["ArticleTitle"]
         self.assertEqual(title, "Ménètrier's Disease")
 
@@ -144,6 +150,7 @@ class TestComplexXmlCases(unittest.TestCase):
         # unless configured otherwise.
         self.assertEqual(len(records), 1)
         self.assertIn("MedlineCitation", records[0])
+        self.assertEqual(records[0]["_record_type"], "citation")
         self.assertEqual(records[0]["MedlineCitation"]["Article"]["ArticleTitle"], "Namespace Test")
 
     def test_empty_elocation(self) -> None:
@@ -161,6 +168,7 @@ class TestComplexXmlCases(unittest.TestCase):
         stream = BytesIO(xml_content)
         records = list(parse_pubmed_xml(stream))
 
+        self.assertEqual(records[0]["_record_type"], "citation")
         elocation = records[0]["MedlineCitation"]["Article"]["ELocationID"]
         self.assertIsInstance(elocation, list)
         self.assertEqual(elocation[0]["@EIdType"], "doi")
