@@ -258,7 +258,7 @@ class TestGoldLogic(unittest.TestCase):
         self.assertNotEqual(
             self._generate_author_id_sql_logic(author_space),
             self._generate_author_id_sql_logic(author_clean),
-            "Whitespace should NOT be trimmed automatically, resulting in different IDs"
+            "Whitespace should NOT be trimmed automatically, resulting in different IDs",
         )
 
         # --- Separator Collision (The Pipe Problem) ---
@@ -272,7 +272,7 @@ class TestGoldLogic(unittest.TestCase):
         self.assertEqual(
             self._generate_author_id_sql_logic(author_a),
             self._generate_author_id_sql_logic(author_b),
-            "Separator collision confirmed: Pipes in data mimic the separator."
+            "Separator collision confirmed: Pipes in data mimic the separator.",
         )
 
     def _flatten_mesh_sql_logic(self, mesh_terms_json: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
