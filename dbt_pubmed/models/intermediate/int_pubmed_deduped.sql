@@ -4,12 +4,20 @@
         unique_key='source_id',
         pre_hook="""
             {% if is_incremental() %}
+                -- Create watermark table only if incremental and the target table exists
+                -- We use a safe strategy: capture max_ts if table exists, else 0.
+                -- Note: '{{ this }}' resolution depends on existence.
                 create temporary table if not exists pubmed_deduped_watermark as
-                select coalesce(max(ingestion_ts), 0) as max_ts from {{ this }};
+                select coalesce(max(ingestion_ts), 0) as max_ts
+                from {{ this }};
             {% endif %}
         """,
         post_hook="""
             {% if is_incremental() %}
+                -- Physical Hard Delete Implementation
+                -- Requirement: Retracted papers (operation='delete') must be removed from the dataset.
+                -- Strategy: Delete from the target table where a corresponding 'delete' record
+                -- exists in the current batch (newer than the captured watermark).
                 delete from {{ this }}
                 where source_id in (
                     select pmid
@@ -17,12 +25,15 @@
                         select
                             pmid,
                             operation,
+                            -- Rank to find the latest operation for this PMID in the batch
                             row_number() over (partition by pmid order by file_name desc, ingestion_ts desc) as rn
                         from {{ ref('stg_pubmed_updates') }}
                         where ingestion_ts > (select max_ts from pubmed_deduped_watermark)
                     ) s
                     where rn = 1 and operation = 'delete'
                 );
+
+                -- Cleanup
                 drop table if exists pubmed_deduped_watermark;
             {% endif %}
         """
@@ -32,6 +43,7 @@
 with baseline as (
     select * from {{ ref('stg_pubmed_baseline') }}
     {% if is_incremental() %}
+    -- Optimization: Only scan baseline if needed (usually baseline is write-once/replace, but for safety)
     where ingestion_ts > (select max_ts from pubmed_deduped_watermark)
     {% endif %}
 ),
@@ -39,6 +51,7 @@ with baseline as (
 updates as (
     select * from {{ ref('stg_pubmed_updates') }}
     {% if is_incremental() %}
+    -- Only process new updates
     where ingestion_ts > (select max_ts from pubmed_deduped_watermark)
     {% endif %}
 ),
