@@ -44,11 +44,11 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_empty_stream(self) -> None:
         """
-        Verify that a 0-byte stream raises an XMLSyntaxError.
+        Verify that a 0-byte stream returns an empty list (graceful handling).
         """
         stream = BytesIO(b"")
-        with self.assertRaises(etree.XMLSyntaxError):
-            list(parse_pubmed_xml(stream))
+        records = list(parse_pubmed_xml(stream))
+        self.assertEqual(records, [])
 
     def test_namespaces(self) -> None:
         """
