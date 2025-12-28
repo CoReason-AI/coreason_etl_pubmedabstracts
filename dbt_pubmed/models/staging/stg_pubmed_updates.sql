@@ -47,6 +47,14 @@ upserts as (
         -- Language
         raw_data -> 'MedlineCitation' -> 'Article' -> 'Language' as languages,
 
+        -- DOI Extraction
+        (
+            select item ->> '#text'
+            from jsonb_array_elements(raw_data -> 'MedlineCitation' -> 'Article' -> 'ELocationID') as item
+            where item ->> '@EIdType' = 'doi'
+            limit 1
+        ) as doi,
+
         'upsert' as operation,
         raw_data
     from source
@@ -71,6 +79,7 @@ deletes as (
         null::jsonb as authors,
         null::jsonb as mesh_terms,
         null::jsonb as languages,
+        null::text as doi,
         'delete' as operation,
         null::jsonb as raw_data
     from source,
