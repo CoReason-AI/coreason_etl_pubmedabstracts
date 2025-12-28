@@ -66,8 +66,9 @@ def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
             # Flatten mixed content in specific text-heavy fields
             # This prevents xmltodict from splitting text due to internal tags like <i>, <b>, <sup>.
             # We strip child tags but preserve their text content.
+            # Use local-name() to handle namespaces robustly (e.g. ns:ArticleTitle vs ArticleTitle)
             for tag in ("ArticleTitle", "AbstractText", "VernacularTitle", "Affiliation"):
-                for node in elem.findall(f".//{tag}"):
+                for node in elem.xpath(f".//*[local-name()='{tag}']"):
                     # Strip all child tags (preserving text)
                     etree.strip_tags(node, "*")
 
