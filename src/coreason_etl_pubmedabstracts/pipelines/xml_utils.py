@@ -69,6 +69,12 @@ def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
             # Parse with xmltodict, forcing specific keys to be lists
             doc = xmltodict.parse(xml_str, force_list=FORCE_LIST_KEYS)
 
+            # Inject _record_type based on the root tag
+            if "MedlineCitation" in doc:
+                doc["_record_type"] = "citation"
+            elif "DeleteCitation" in doc:
+                doc["_record_type"] = "delete"
+
             yield doc
 
             # Important: Clear the element to save memory
