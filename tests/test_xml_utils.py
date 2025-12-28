@@ -140,3 +140,105 @@ class TestXmlUtils(unittest.TestCase):
         mesh_headings = citation["MeshHeadingList"]["MeshHeading"]
         self.assertIsInstance(mesh_headings, list)
         self.assertEqual(len(mesh_headings), 1)
+
+    def test_mixed_content_flattening(self) -> None:
+        """Test that mixed content (e.g., <i>, <b>) is flattened but text is preserved."""
+        xml_content = b"""
+        <PubmedArticleSet>
+            <MedlineCitation>
+                <Article>
+                    <ArticleTitle>
+                        Usage of <i>italics</i> and <b>bold</b> in titles.
+                    </ArticleTitle>
+                    <Abstract>
+                        <AbstractText>
+                            This is a <sub>subscript</sub> test.
+                        </AbstractText>
+                    </Abstract>
+                </Article>
+            </MedlineCitation>
+        </PubmedArticleSet>
+        """
+        stream = BytesIO(xml_content)
+        records = list(parse_pubmed_xml(stream))
+
+        title = records[0]["MedlineCitation"]["Article"]["ArticleTitle"]
+        # Whitespace handling in lxml/xmltodict can be tricky, so we strip
+        # But generally, it should concatenate text.
+        # "Usage of " + "italics" + " and " + "bold" + " in titles."
+        self.assertIn("Usage of italics and bold in titles.", title.replace('\n', ' ').replace('  ', ' '))
+
+        abstract = records[0]["MedlineCitation"]["Article"]["Abstract"]["AbstractText"]
+        self.assertIn("This is a subscript test.", abstract.replace('\n', ' ').replace('  ', ' '))
+
+    def test_namespace_robustness(self) -> None:
+        """Test that we can handle namespaces and still flatten mixed content."""
+        xml_content = b"""
+        <ns:PubmedArticleSet xmlns:ns="http://example.com/ns">
+            <ns:MedlineCitation>
+                <ns:Article>
+                    <ns:ArticleTitle>
+                        Namespace <i>mixed</i> content.
+                    </ns:ArticleTitle>
+                </ns:Article>
+            </ns:MedlineCitation>
+        </ns:PubmedArticleSet>
+        """
+        stream = BytesIO(xml_content)
+        records = list(parse_pubmed_xml(stream))
+
+        self.assertEqual(len(records), 1)
+        # Check if keys have namespaces. xmltodict preserves them by default.
+        # The key should be "ns:MedlineCitation"
+        self.assertIn("ns:MedlineCitation", records[0])
+        self.assertEqual(records[0]["_record_type"], "citation")
+
+        citation = records[0]["ns:MedlineCitation"]
+        title = citation["ns:Article"]["ns:ArticleTitle"]
+
+        # Verify flattening worked (<i> tag stripped)
+        self.assertIn("Namespace mixed content.", title.replace('\n', ' ').replace('  ', ' '))
+        # Verify <i> is gone
+        self.assertNotIn("<i>", title)
+
+    def test_utf8_encoding(self) -> None:
+        """Test that UTF-8 characters are preserved."""
+        xml_content = "    <PubmedArticleSet><MedlineCitation><Article><ArticleTitle>Café étude</ArticleTitle></Article></MedlineCitation></PubmedArticleSet>".encode('utf-8')
+
+        stream = BytesIO(xml_content)
+        records = list(parse_pubmed_xml(stream))
+
+        title = records[0]["MedlineCitation"]["Article"]["ArticleTitle"]
+        self.assertEqual(title, "Café étude")
+
+    def test_deeply_nested_structure(self) -> None:
+        """Test a deep structure with multiple forced lists."""
+        xml_content = b"""
+        <PubmedArticleSet>
+            <MedlineCitation>
+                <Article>
+                    <AuthorList>
+                        <Author ValidYN="Y">
+                            <LastName>Smith</LastName>
+                            <ForeName>J</ForeName>
+                            <Identifier Source="ORCID">0000-0000-0000-0000</Identifier>
+                        </Author>
+                    </AuthorList>
+                </Article>
+                <ChemicalList>
+                    <Chemical>
+                        <NameOfSubstance UI="D000000">TestSubstance</NameOfSubstance>
+                    </Chemical>
+                </ChemicalList>
+            </MedlineCitation>
+        </PubmedArticleSet>
+        """
+        stream = BytesIO(xml_content)
+        records = list(parse_pubmed_xml(stream))
+
+        citation = records[0]["MedlineCitation"]
+        # ChemicalList -> Chemical (list) -> NameOfSubstance (list)
+        # because NameOfSubstance is in FORCE_LIST_KEYS
+        substances = citation["ChemicalList"]["Chemical"][0]["NameOfSubstance"]
+        self.assertIsInstance(substances, list)
+        self.assertEqual(substances[0]["#text"], "TestSubstance")
