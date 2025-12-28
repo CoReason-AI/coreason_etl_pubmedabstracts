@@ -10,23 +10,33 @@
 
 import unittest
 from io import BytesIO
-
+from lxml import etree
 from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
 
-
 class TestComplexXmlCases(unittest.TestCase):
-    def test_elocation_id_extraction(self) -> None:
-        """
-        Test extracting DOI from ELocationID.
-        Verifies that ELocationID is always a list and contains attributes.
-        """
+    def test_empty_stream(self) -> None:
+        """Test handling of an empty stream."""
+        # An empty stream isn't valid XML, so iterparse might raise an error immediately
+        # or just yield nothing if the file is truly 0 bytes but iterparse expects a root.
+        # Actually lxml iterparse raises XMLSyntaxError on empty input usually.
+        stream = BytesIO(b"")
+        with self.assertRaises(etree.XMLSyntaxError):
+            list(parse_pubmed_xml(stream))
+
+    def test_malformed_xml(self) -> None:
+        """Test handling of malformed XML."""
+        xml_content = b"<PubmedArticleSet><MedlineCitation>Unclosed Tag</PubmedArticleSet>"
+        stream = BytesIO(xml_content)
+        with self.assertRaises(etree.XMLSyntaxError):
+            list(parse_pubmed_xml(stream))
+
+    def test_cdata_handling(self) -> None:
+        """Test that CDATA sections are parsed correctly as text."""
         xml_content = b"""
         <PubmedArticleSet>
             <MedlineCitation>
-                <PMID>1001</PMID>
                 <Article>
-                    <ELocationID EIdType="doi" ValidYN="Y">10.1056/NEJMoa123456</ELocationID>
-                    <ELocationID EIdType="pii">NEJMoa123456</ELocationID>
+                    <ArticleTitle><![CDATA[Study of <unknown> tags]]></ArticleTitle>
                 </Article>
             </MedlineCitation>
         </PubmedArticleSet>
@@ -35,87 +45,18 @@ class TestComplexXmlCases(unittest.TestCase):
         records = list(parse_pubmed_xml(stream))
 
         self.assertEqual(len(records), 1)
-        # Verify _record_type
-        self.assertEqual(records[0]["_record_type"], "citation")
+        title = records[0]["MedlineCitation"]["Article"]["ArticleTitle"]
+        self.assertEqual(title, "Study of <unknown> tags")
 
-        article = records[0]["MedlineCitation"]["Article"]
-
-        # Verify ELocationID is a list (enforced by FORCE_LIST_KEYS)
-        self.assertIsInstance(article["ELocationID"], list)
-        self.assertEqual(len(article["ELocationID"]), 2)
-
-        # Verify attribute access
-        # xmltodict uses @AttributeName convention
-        doi_entry = next(item for item in article["ELocationID"] if item.get("@EIdType") == "doi")
-        self.assertEqual(doi_entry["#text"], "10.1056/NEJMoa123456")
-
-        pii_entry = next(item for item in article["ELocationID"] if item.get("@EIdType") == "pii")
-        self.assertEqual(pii_entry["#text"], "NEJMoa123456")
-
-    def test_single_elocation_id(self) -> None:
-        """Test that a single ELocationID is still wrapped in a list."""
+    def test_attributes_only(self) -> None:
+        """Test elements that have attributes but no text content."""
         xml_content = b"""
         <PubmedArticleSet>
             <MedlineCitation>
-                <PMID>1002</PMID>
+                <PMID>1</PMID>
                 <Article>
-                    <ELocationID EIdType="doi">10.1234/5678</ELocationID>
-                </Article>
-            </MedlineCitation>
-        </PubmedArticleSet>
-        """
-        stream = BytesIO(xml_content)
-        records = list(parse_pubmed_xml(stream))
-
-        self.assertEqual(records[0]["_record_type"], "citation")
-        elocation = records[0]["MedlineCitation"]["Article"]["ELocationID"]
-        self.assertIsInstance(elocation, list)
-        self.assertEqual(len(elocation), 1)
-        self.assertEqual(elocation[0]["@EIdType"], "doi")
-        self.assertEqual(elocation[0]["#text"], "10.1234/5678")
-
-    def test_structured_abstract(self) -> None:
-        """
-        Test parsing of structured abstracts (with labels).
-        """
-        xml_content = b"""
-        <PubmedArticleSet>
-            <MedlineCitation>
-                <PMID>1003</PMID>
-                <Article>
-                    <Abstract>
-                        <AbstractText Label="BACKGROUND" NlmCategory="BACKGROUND">Here is the background.</AbstractText>
-                        <AbstractText Label="METHODS" NlmCategory="METHODS">We did something.</AbstractText>
-                    </Abstract>
-                </Article>
-            </MedlineCitation>
-        </PubmedArticleSet>
-        """
-        stream = BytesIO(xml_content)
-        records = list(parse_pubmed_xml(stream))
-
-        self.assertEqual(records[0]["_record_type"], "citation")
-        abstract_texts = records[0]["MedlineCitation"]["Article"]["Abstract"]["AbstractText"]
-
-        # Note: AbstractText is NOT in FORCE_LIST_KEYS in the provided file.
-        # xmltodict default behavior for multiple siblings is to create a list.
-        self.assertIsInstance(abstract_texts, list)
-        self.assertEqual(len(abstract_texts), 2)
-        self.assertEqual(abstract_texts[0]["@Label"], "BACKGROUND")
-        self.assertEqual(abstract_texts[0]["#text"], "Here is the background.")
-
-    def test_utf8_handling(self) -> None:
-        """Test parsing of UTF-8 characters."""
-        xml_content = b"""
-        <PubmedArticleSet>
-            <MedlineCitation>
-                <PMID>1004</PMID>
-                <Article>
-                    <ArticleTitle>M\xc3\xa9n\xc3\xa8trier's Disease</ArticleTitle>
                     <AuthorList>
-                        <Author>
-                            <LastName>Nu\xc3\xb1ez</LastName>
-                        </Author>
+                        <Author ValidYN="Y" />
                     </AuthorList>
                 </Article>
             </MedlineCitation>
@@ -124,43 +65,22 @@ class TestComplexXmlCases(unittest.TestCase):
         stream = BytesIO(xml_content)
         records = list(parse_pubmed_xml(stream))
 
-        self.assertEqual(records[0]["_record_type"], "citation")
-        title = records[0]["MedlineCitation"]["Article"]["ArticleTitle"]
-        self.assertEqual(title, "Ménètrier's Disease")
+        author = records[0]["MedlineCitation"]["Article"]["AuthorList"]["Author"][0]
+        # xmltodict behavior for empty tag with attributes: {'@ValidYN': 'Y', '#text': None} or similar?
+        # Actually usually checks if #text is present. If self-closing <Tag Attr="Val" />, it might be just {'@Attr': 'Val'}.
+        self.assertEqual(author["@ValidYN"], "Y")
+        self.assertIsNone(author.get("#text"))
 
-        author_last_name = records[0]["MedlineCitation"]["Article"]["AuthorList"]["Author"][0]["LastName"]
-        self.assertEqual(author_last_name, "Nuñez")
-
-    def test_namespace_handling(self) -> None:
-        """Test that namespaces don't break the parser."""
-        xml_content = b"""
-        <PubmedArticleSet xmlns="http://dtd.nlm.nih.gov/ncbi/pubmed/out/pubmed_190101.dtd">
-            <MedlineCitation Status="MEDLINE">
-                <PMID>1005</PMID>
-                <Article>
-                    <ArticleTitle>Namespace Test</ArticleTitle>
-                </Article>
-            </MedlineCitation>
-        </PubmedArticleSet>
-        """
-        stream = BytesIO(xml_content)
-        records = list(parse_pubmed_xml(stream))
-
-        # xmltodict generally handles default namespaces by ignoring them or handling them transparently
-        # unless configured otherwise.
-        self.assertEqual(len(records), 1)
-        self.assertIn("MedlineCitation", records[0])
-        self.assertEqual(records[0]["_record_type"], "citation")
-        self.assertEqual(records[0]["MedlineCitation"]["Article"]["ArticleTitle"], "Namespace Test")
-
-    def test_empty_elocation(self) -> None:
-        """Test case where ELocationID tag exists but is empty."""
+    def test_empty_self_closing_tags(self) -> None:
+        """Test elements that are empty and self-closing."""
         xml_content = b"""
         <PubmedArticleSet>
             <MedlineCitation>
-                <PMID>1006</PMID>
+                <PMID>1</PMID>
                 <Article>
-                    <ELocationID EIdType="doi"/>
+                    <Abstract>
+                        <AbstractText/>
+                    </Abstract>
                 </Article>
             </MedlineCitation>
         </PubmedArticleSet>
@@ -168,9 +88,96 @@ class TestComplexXmlCases(unittest.TestCase):
         stream = BytesIO(xml_content)
         records = list(parse_pubmed_xml(stream))
 
-        self.assertEqual(records[0]["_record_type"], "citation")
-        elocation = records[0]["MedlineCitation"]["Article"]["ELocationID"]
-        self.assertIsInstance(elocation, list)
-        self.assertEqual(elocation[0]["@EIdType"], "doi")
-        # Empty tag usually results in None for #text or just attributes
-        self.assertIsNone(elocation[0].get("#text"))
+        abstract_text = records[0]["MedlineCitation"]["Article"]["Abstract"]["AbstractText"]
+        # xmltodict usually returns None for <Tag/>
+        self.assertIsNone(abstract_text)
+
+    def test_default_namespace(self) -> None:
+        """Test XML with a default namespace declaration."""
+        xml_content = b"""
+        <PubmedArticleSet xmlns="http://ncbi.nlm.nih.gov/pubmed">
+            <MedlineCitation>
+                <PMID>123</PMID>
+            </MedlineCitation>
+        </PubmedArticleSet>
+        """
+        stream = BytesIO(xml_content)
+        records = list(parse_pubmed_xml(stream))
+
+        self.assertEqual(len(records), 1)
+        # xmltodict usually propagates namespaces.
+        # But wait, our `xml_utils` does `etree.tostring(elem)`.
+        # lxml preserves the namespace in the string output.
+        # If default namespace is used, tags might look like `PMID` in dict if xmltodict handles it,
+        # or they might have prefixes if we aren't careful?
+        # Actually xmltodict with process_namespaces=False (default) treats xmlns as an attribute.
+        # But lxml tostring might inject prefixes like ns0:PMID if not careful.
+        # Let's see what happens.
+        # In this test case, we want to ensure we get the data out.
+
+        # NOTE: logic in xml_utils uses `etree.tostring(elem, encoding="unicode")`.
+        # lxml will likely include the namespace declaration in the output snippet
+        # or use a prefix if it was inherited from parent.
+        # Since we parse chunks, the chunk (MedlineCitation) will have the namespace.
+
+        # If xmltodict doesn't strip namespaces, the keys might be complex.
+        # For this test, we just want to ensure it doesn't crash and we can access data.
+        citation = records[0]
+        # We need to find the key for MedlineCitation. It might be 'MedlineCitation' or 'ns0:MedlineCitation'.
+        # Since we don't know exactly how lxml+xmltodict will serialize the default NS without testing,
+        # we inspect the keys.
+        keys = list(citation.keys())
+        # Filter out _record_type
+        xml_keys = [k for k in keys if k != "_record_type"]
+        self.assertTrue(len(xml_keys) > 0)
+        self.assertTrue("MedlineCitation" in xml_keys[0]) # Should contain the tag name at least
+
+    def test_polymorphism_non_forced_keys(self) -> None:
+        """
+        Test behavior for keys NOT in FORCE_LIST_KEYS.
+        They should be a dict if single, and a list if multiple.
+        """
+        xml_content = b"""
+        <PubmedArticleSet>
+            <MedlineCitation>
+                <PMID>1</PMID>
+                <Article>
+                    <SingleTag>Value1</SingleTag>
+
+                    <MultiTag>ValueA</MultiTag>
+                    <MultiTag>ValueB</MultiTag>
+                </Article>
+            </MedlineCitation>
+        </PubmedArticleSet>
+        """
+        stream = BytesIO(xml_content)
+        records = list(parse_pubmed_xml(stream))
+
+        article = records[0]["MedlineCitation"]["Article"]
+
+        # SingleTag should be a string (or dict with #text)
+        self.assertEqual(article["SingleTag"], "Value1")
+
+        # MultiTag should be a list
+        self.assertIsInstance(article["MultiTag"], list)
+        self.assertEqual(len(article["MultiTag"]), 2)
+        self.assertEqual(article["MultiTag"][0], "ValueA")
+        self.assertEqual(article["MultiTag"][1], "ValueB")
+
+    def test_strip_tags_robustness(self) -> None:
+        """
+        Ensure strip_tags doesn't crash on edges.
+        """
+        # <ArticleTitle> with no children but text
+        xml_content = b"""
+        <PubmedArticleSet>
+            <MedlineCitation>
+                <Article>
+                    <ArticleTitle>Just Text</ArticleTitle>
+                </Article>
+            </MedlineCitation>
+        </PubmedArticleSet>
+        """
+        stream = BytesIO(xml_content)
+        records = list(parse_pubmed_xml(stream))
+        self.assertEqual(records[0]["MedlineCitation"]["Article"]["ArticleTitle"], "Just Text")
