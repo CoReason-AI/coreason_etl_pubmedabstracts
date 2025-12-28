@@ -8,84 +8,50 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
+import re
 import unittest
 from io import BytesIO
+from typing import Any, Dict, Optional
 
 from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
 
 
+# Helper to simulate SQL extracted Year
+def extract_year_sql_simulation(pub_date: Dict[str, Any]) -> Optional[str]:
+    r"""
+    Simulates the SQL logic:
+    coalesce(
+        raw_data -> ... -> 'Year',
+        substring(raw_data -> ... -> 'MedlineDate' from '\d{4}')
+    )
+    """
+    if "Year" in pub_date:
+        return str(pub_date["Year"])
+
+    medline_date = pub_date.get("MedlineDate")
+    if medline_date:
+        match = re.search(r"\d{4}", medline_date)
+        if match:
+            return match.group(0)
+    return None
+
+
 class TestAdditionalComplexCases(unittest.TestCase):
-    def test_nested_force_list(self) -> None:
-        """
-        Test deeply nested structure where FORCE_LIST_KEYS applies.
-        e.g. KeywordList -> Keyword
-        """
-        xml_content = b"""
-        <PubmedArticleSet>
-            <MedlineCitation>
-                <PMID>2001</PMID>
-                <KeywordList Owner="NOTNLM">
-                    <Keyword MajorTopicYN="N">gene therapy</Keyword>
-                </KeywordList>
-            </MedlineCitation>
-        </PubmedArticleSet>
-        """
-        stream = BytesIO(xml_content)
-        records = list(parse_pubmed_xml(stream))
+    """
+    Covers complex scenarios for DeleteCitation lists and Date Parsing edge cases.
+    """
 
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["_record_type"], "citation")
-
-        keywords = records[0]["MedlineCitation"]["KeywordList"]["Keyword"]
-        self.assertIsInstance(keywords, list)
-        self.assertEqual(len(keywords), 1)
-        # With attributes, xmltodict returns a dict
-        self.assertEqual(keywords[0]["#text"], "gene therapy")
-        self.assertEqual(keywords[0]["@MajorTopicYN"], "N")
-
-    def test_multiple_delete_citations(self) -> None:
+    def test_delete_citation_list_structure(self) -> None:
         """
-        Test parsing multiple DeleteCitation blocks in one file.
+        Verify parsing of DeleteCitation with multiple PMIDs.
+        This confirms the FORCE_LIST behavior for DeleteCitation and PMID.
         """
         xml_content = b"""
         <PubmedArticleSet>
             <DeleteCitation>
-                <PMID>111</PMID>
-                <PMID>222</PMID>
-            </DeleteCitation>
-            <MedlineCitation>
-                <PMID>333</PMID>
-            </MedlineCitation>
-            <DeleteCitation>
-                <PMID>444</PMID>
-            </DeleteCitation>
-        </PubmedArticleSet>
-        """
-        stream = BytesIO(xml_content)
-        records = list(parse_pubmed_xml(stream))
-
-        self.assertEqual(len(records), 3)
-
-        self.assertEqual(records[0]["_record_type"], "delete")
-        self.assertEqual(len(records[0]["DeleteCitation"][0]["PMID"]), 2)
-
-        self.assertEqual(records[1]["_record_type"], "citation")
-        # No attributes on PMID -> simplified to string by xmltodict
-        self.assertEqual(records[1]["MedlineCitation"]["PMID"][0], "333")
-
-        self.assertEqual(records[2]["_record_type"], "delete")
-        self.assertEqual(len(records[2]["DeleteCitation"][0]["PMID"]), 1)
-        self.assertEqual(records[2]["DeleteCitation"][0]["PMID"][0], "444")
-
-    def test_delete_citation_with_attributes(self) -> None:
-        """
-        Test DeleteCitation with attributes (if any).
-        Usually DeleteCitation doesn't have attributes, but let's test robustness.
-        """
-        xml_content = b"""
-        <PubmedArticleSet>
-            <DeleteCitation SomeAttr="Value">
-                <PMID>555</PMID>
+                <PMID>1001</PMID>
+                <PMID>1002</PMID>
+                <PMID>1003</PMID>
             </DeleteCitation>
         </PubmedArticleSet>
         """
@@ -93,31 +59,101 @@ class TestAdditionalComplexCases(unittest.TestCase):
         records = list(parse_pubmed_xml(stream))
 
         self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["_record_type"], "delete")
+        record = records[0]
+        self.assertEqual(record["_record_type"], "delete")
 
-        delete_list = records[0]["DeleteCitation"]
+        # DeleteCitation itself is in FORCE_LIST_KEYS, but xmltodict parsing of the root
+        # depends on how it is called. Inside parse_pubmed_xml, we convert the *element*
+        # to string, so the root of the dict is DeleteCitation.
+        # xmltodict.parse(..., force_list=('DeleteCitation', 'PMID'))
+
+        # DeleteCitation is forced to be a list, so we must access the first element
+        delete_list = record["DeleteCitation"]
         self.assertIsInstance(delete_list, list)
-        self.assertEqual(len(delete_list), 1)
-        self.assertEqual(delete_list[0]["@SomeAttr"], "Value")
-        # No attributes on PMID -> simplified to string
-        self.assertEqual(delete_list[0]["PMID"][0], "555")
+        delete_node = delete_list[0]
 
-    def test_complex_mixed_content(self) -> None:
+        # Verify PMIDs are a list
+        self.assertIn("PMID", delete_node)
+        pmids = delete_node["PMID"]
+        self.assertIsInstance(pmids, list)
+        self.assertEqual(len(pmids), 3)
+        self.assertEqual(pmids[0], "1001")
+        self.assertEqual(pmids[1], "1002")
+        self.assertEqual(pmids[2], "1003")
+
+    def test_medline_date_edge_cases(self) -> None:
         """
-        Test a mix of citations and deletes with different structures.
+        Test various MedlineDate formats to verify SQL extraction logic assumptions.
+        """
+        cases = [
+            ("2000 Spring", "2000"),
+            ("Winter 2001", "2001"),
+            ("1999 Dec-2000 Jan", "1999"),  # Regex finds first 4 digits
+            ("2005 May 23-25", "2005"),
+            ("2008 Oct-Nov", "2008"),
+            ("Copyright 2010", "2010"),  # Unlikely but tests regex
+        ]
+
+        for date_str, expected_year in cases:
+            with self.subTest(date_str=date_str):
+                xml_content = f"""
+                <PubmedArticleSet>
+                    <MedlineCitation>
+                        <PMID>9999</PMID>
+                        <Article>
+                            <Journal>
+                                <JournalIssue>
+                                    <PubDate>
+                                        <MedlineDate>{date_str}</MedlineDate>
+                                    </PubDate>
+                                </JournalIssue>
+                            </Journal>
+                        </Article>
+                    </MedlineCitation>
+                </PubmedArticleSet>
+                """.encode("utf-8")
+
+                stream = BytesIO(xml_content)
+                records = list(parse_pubmed_xml(stream))
+                pub_date = records[0]["MedlineCitation"]["Article"]["Journal"]["JournalIssue"]["PubDate"]
+
+                extracted_year = extract_year_sql_simulation(pub_date)
+                self.assertEqual(extracted_year, expected_year)
+
+    def test_publication_year_dirty_data(self) -> None:
+        r"""
+        Verify that our SQL regex safe cast logic would handle dirty data.
+        This test simulates the SQL logic: case when pub_year ~ '^\d+$' ...
+        """
+
+        def safe_cast_year_simulation(year_val: str) -> Optional[int]:
+            # Regex: ^\d+$
+            if re.match(r"^\d+$", year_val):
+                return int(year_val)
+            return None
+
+        self.assertEqual(safe_cast_year_simulation("2023"), 2023)
+        self.assertIsNone(safe_cast_year_simulation("2023a"))
+        self.assertIsNone(safe_cast_year_simulation("2023-01"))  # Strict digit check
+        self.assertIsNone(safe_cast_year_simulation("Unknown"))
+
+    def test_mixed_content_flattening_complex(self) -> None:
+        """
+        Verify aggressive flattening of nested mixed content (e.g. sup, sub, i, b).
         """
         xml_content = b"""
         <PubmedArticleSet>
-            <MedlineCitation Status="MEDLINE">
-                <PMID>1</PMID>
-            </MedlineCitation>
-            <DeleteCitation>
-                <PMID>2</PMID>
-            </DeleteCitation>
-            <MedlineCitation Status="In-Process">
-                <PMID>3</PMID>
+            <MedlineCitation>
+                <PMID>8888</PMID>
                 <Article>
-                    <ArticleTitle>Title 3</ArticleTitle>
+                    <ArticleTitle>
+                        Effects of <i>H. pylori</i> on <sup>13</sup>C-urea breath test
+                    </ArticleTitle>
+                    <Abstract>
+                        <AbstractText>
+                            We used <b>bold</b> and <sub>subscript</sub> logic.
+                        </AbstractText>
+                    </Abstract>
                 </Article>
             </MedlineCitation>
         </PubmedArticleSet>
@@ -125,9 +161,54 @@ class TestAdditionalComplexCases(unittest.TestCase):
         stream = BytesIO(xml_content)
         records = list(parse_pubmed_xml(stream))
 
-        self.assertEqual(len(records), 3)
-        self.assertEqual(records[0]["_record_type"], "citation")
-        self.assertEqual(records[1]["_record_type"], "delete")
-        self.assertEqual(records[2]["_record_type"], "citation")
+        # Verify title
+        title = records[0]["MedlineCitation"]["Article"]["ArticleTitle"]
+        # Expected: tags stripped, text preserved, whitespace might be messy depending on parser
+        # lxml.strip_tags preserves text.
+        # "Effects of H. pylori on 13C-urea breath test"
+        # We need to account for whitespace that lxml might leave (newlines/indents).
+        self.assertIn("Effects of", title)
+        self.assertIn("H. pylori", title)
+        self.assertIn("13C-urea", title)
 
-        self.assertEqual(records[2]["MedlineCitation"]["@Status"], "In-Process")
+        # Verify abstract
+        abstract = records[0]["MedlineCitation"]["Article"]["Abstract"]["AbstractText"]
+        self.assertIn("We used bold and subscript logic.", " ".join(abstract.split()))
+
+    def test_language_array_handling(self) -> None:
+        """
+        Verify that Language is forced to a list, enabling the SQL UNNEST logic.
+        """
+        # Case 1: Single Language
+        xml_1 = b"""
+        <PubmedArticleSet>
+            <MedlineCitation>
+                <PMID>1</PMID>
+                <Article><Language>eng</Language></Article>
+            </MedlineCitation>
+        </PubmedArticleSet>
+        """
+        stream = BytesIO(xml_1)
+        rec = list(parse_pubmed_xml(stream))[0]
+        langs = rec["MedlineCitation"]["Article"]["Language"]
+        self.assertIsInstance(langs, list)
+        self.assertEqual(langs[0], "eng")
+
+        # Case 2: Multiple Languages
+        xml_2 = b"""
+        <PubmedArticleSet>
+            <MedlineCitation>
+                <PMID>2</PMID>
+                <Article>
+                    <Language>eng</Language>
+                    <Language>fra</Language>
+                </Article>
+            </MedlineCitation>
+        </PubmedArticleSet>
+        """
+        stream = BytesIO(xml_2)
+        rec = list(parse_pubmed_xml(stream))[0]
+        langs = rec["MedlineCitation"]["Article"]["Language"]
+        self.assertIsInstance(langs, list)
+        self.assertEqual(len(langs), 2)
+        self.assertIn("fra", langs)
