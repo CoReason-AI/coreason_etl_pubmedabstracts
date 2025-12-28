@@ -367,6 +367,56 @@ class TestGoldLogic(unittest.TestCase):
         # Case 4: Duplicate entries in source list (should pass if one matches)
         self.assertTrue(self._filter_language_sql_logic(["eng", "eng", "fre"], "eng"))
 
+    def _simulate_gold_filtering(self, records: List[Dict[str, Any]], filter_lang: str) -> List[Dict[str, Any]]:
+        """
+        Helper to mimic the WHERE clause filtering on a list of records.
+        """
+        return [r for r in records if self._filter_language_sql_logic(r.get("languages"), filter_lang)]
+
+    def test_language_filter_exclusion(self) -> None:
+        """
+        Verify that records are correctly included/excluded based on the language filter.
+        Strictly tests: Exclusion, Inclusion, and Null Safety (Null/Empty lists).
+        """
+        # Mock Records
+        records = [
+            {"id": 1, "languages": ["eng"]},
+            {"id": 2, "languages": ["fre"]},  # Exclude
+            {"id": 3, "languages": ["eng", "fre"]},  # Include
+            {"id": 4, "languages": []},  # Exclude (Null Safety)
+            {"id": 5, "languages": None},  # Exclude (Null Safety)
+            {"id": 6, "languages": ["spa"]},  # Exclude
+        ]
+
+        # Scenario 1: Filter = 'eng'
+        filtered_eng = self._simulate_gold_filtering(records, "eng")
+        ids_eng = [r["id"] for r in filtered_eng]
+
+        # Assert correct inclusions
+        self.assertIn(1, ids_eng)
+        self.assertIn(3, ids_eng)
+
+        # Assert correct exclusions (Strict checks)
+        self.assertNotIn(2, ids_eng)
+        self.assertNotIn(4, ids_eng)
+        self.assertNotIn(5, ids_eng)
+        self.assertNotIn(6, ids_eng)
+        self.assertEqual(len(filtered_eng), 2)
+
+        # Scenario 2: Filter = 'fre'
+        filtered_fre = self._simulate_gold_filtering(records, "fre")
+        ids_fre = [r["id"] for r in filtered_fre]
+
+        self.assertIn(2, ids_fre)
+        self.assertIn(3, ids_fre)
+        self.assertNotIn(1, ids_fre)
+        self.assertEqual(len(filtered_fre), 2)
+
+        # Scenario 3: Filter = '' (Should include all)
+        # Note: SQL Logic: OR FILTER_LANGUAGE = ''
+        filtered_all = self._simulate_gold_filtering(records, "")
+        self.assertEqual(len(filtered_all), 6)
+
     def test_publication_year_complex(self) -> None:
         """Verify year extraction resilience."""
         # Case 1: Year 0 (Regex \d+ matches, but typically invalid for analysis)
