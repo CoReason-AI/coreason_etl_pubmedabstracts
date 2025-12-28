@@ -379,7 +379,7 @@ class TestGoldLogic(unittest.TestCase):
         Strictly tests: Exclusion, Inclusion, and Null Safety (Null/Empty lists).
         """
         # Mock Records
-        records = [
+        records: List[Dict[str, Any]] = [
             {"id": 1, "languages": ["eng"]},
             {"id": 2, "languages": ["fre"]},  # Exclude
             {"id": 3, "languages": ["eng", "fre"]},  # Include
