@@ -1,10 +1,10 @@
 {{
     config(
-        materialized='table',
+        materialized='partitioned_table',
+        partition_by='publication_year',
         indexes=[
             {'columns': ['publication_year']}
-        ],
-        post_hook="-- Partitioning by publication_year is required. Since dbt-postgres doesn't support declarative partitioning in table materialization, this table is indexed on publication_year. For production, convert to a partitioned table manually or via a custom materialization."
+        ]
     )
 }}
 
