@@ -280,6 +280,6 @@ class TestGoldLogic(unittest.TestCase):
         self.assertIsNone(result[0]["descriptor_ui"])
 
         # Case 2: DescriptorName is empty dict
-        mesh_empty = [{"DescriptorName": {}}]
+        mesh_empty: List[Dict[str, Any]] = [{"DescriptorName": {}}]
         result_empty = self._flatten_mesh_sql_logic(mesh_empty)
         self.assertIsNone(result_empty[0]["descriptor_name"])
