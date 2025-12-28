@@ -11,6 +11,7 @@
 import unittest
 from typing import Any, Dict, List, Set
 
+
 class TestComplianceHardDelete(unittest.TestCase):
     """
     Compliance verification for Physical Hard Deletes.
@@ -19,10 +20,7 @@ class TestComplianceHardDelete(unittest.TestCase):
     """
 
     def _simulate_incremental_delete(
-        self,
-        existing_records: List[Dict[str, Any]],
-        updates_batch: List[Dict[str, Any]],
-        watermark_ts: float
+        self, existing_records: List[Dict[str, Any]], updates_batch: List[Dict[str, Any]], watermark_ts: float
     ) -> List[Dict[str, Any]]:
         """
         Simulates the dbt incremental logic + post-hook deletion.
@@ -77,7 +75,7 @@ class TestComplianceHardDelete(unittest.TestCase):
             current_state[pmid] = {
                 "source_id": pmid,
                 "ingestion_ts": record["ingestion_ts"],
-                "title": record.get("title", "Updated")
+                "title": record.get("title", "Updated"),
             }
 
         # Apply Deletes (Post-Hook)
@@ -94,19 +92,10 @@ class TestComplianceHardDelete(unittest.TestCase):
         The system must not contain the paper after the delete batch is processed.
         """
         # Initial State: Paper 12345 exists
-        existing = [
-            {"source_id": "12345", "ingestion_ts": 100.0, "title": "Valid Science"}
-        ]
+        existing = [{"source_id": "12345", "ingestion_ts": 100.0, "title": "Valid Science"}]
 
         # Batch: Retraction notice arrives
-        batch = [
-            {
-                "pmid": "12345",
-                "operation": "delete",
-                "ingestion_ts": 110.0,
-                "file_name": "pubmed24n0100.xml.gz"
-            }
-        ]
+        batch = [{"pmid": "12345", "operation": "delete", "ingestion_ts": 110.0, "file_name": "pubmed24n0100.xml.gz"}]
 
         # Run
         result = self._simulate_incremental_delete(existing, batch, watermark_ts=105.0)
@@ -118,7 +107,7 @@ class TestComplianceHardDelete(unittest.TestCase):
         """
         Scenario: Paper Retracted (Delete), then Re-instated/Updated (Upsert) in a LATER batch.
         """
-        existing = [] # Paper was deleted previously
+        existing: List[Dict[str, Any]] = []  # Paper was deleted previously
 
         batch = [
             {
@@ -126,7 +115,7 @@ class TestComplianceHardDelete(unittest.TestCase):
                 "operation": "upsert",
                 "ingestion_ts": 120.0,
                 "file_name": "pubmed24n0101.xml.gz",
-                "title": "Reinstated Science"
+                "title": "Reinstated Science",
             }
         ]
 
