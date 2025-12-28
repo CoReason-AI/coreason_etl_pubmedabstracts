@@ -172,3 +172,42 @@ class TestGoldLogic(unittest.TestCase):
         ]
 
         self.assertEqual(self._flatten_mesh_sql_logic(mesh), expected)
+
+    def _filter_language_sql_logic(self, languages_json: Optional[List[str]], filter_lang: Optional[str]) -> bool:
+        """
+        Mimics logic in `gold_pubmed_knowledge.sql` for language filtering.
+
+        SQL Logic:
+        exists (select 1 from ... where lang = FILTER_LANGUAGE)
+        OR FILTER_LANGUAGE = ''
+        OR FILTER_LANGUAGE IS NULL
+        """
+        # "OR FILTER_LANGUAGE = '' OR ... IS NULL"
+        if filter_lang is None or filter_lang == "":
+            return True
+
+        # "coalesce(languages, '[]'::jsonb)"
+        if not languages_json:
+            return False
+
+        # "exists (... where lang = FILTER_LANGUAGE)"
+        return filter_lang in languages_json
+
+    def test_language_filter(self) -> None:
+        # Case 1: Match Found (Standard 'eng')
+        self.assertTrue(self._filter_language_sql_logic(["eng", "fre"], "eng"))
+
+        # Case 2: No Match
+        self.assertFalse(self._filter_language_sql_logic(["fre", "spa"], "eng"))
+
+        # Case 3: Empty Language List
+        self.assertFalse(self._filter_language_sql_logic([], "eng"))
+
+        # Case 4: None Language List (SQL coalesce handles this)
+        self.assertFalse(self._filter_language_sql_logic(None, "eng"))
+
+        # Case 5: Filter is Empty String (Should allow all)
+        self.assertTrue(self._filter_language_sql_logic(["fre"], ""))
+
+        # Case 6: Filter is None (Should allow all)
+        self.assertTrue(self._filter_language_sql_logic(["fre"], None))
