@@ -186,6 +186,95 @@ class TestGoldLogic(unittest.TestCase):
         expected_empty = str(uuid.uuid5(uuid.NAMESPACE_DNS, "||"))
         self.assertEqual(uuid_empty, expected_empty)
 
+    def _generate_mesh_id_sql_logic(self, mesh_item: Dict[str, Any]) -> str:
+        """
+        Mimics uuid_generate_v5 logic in gold_pubmed_mesh.sql.
+        Key: DescriptorUI if exists, else DescriptorName.
+        """
+        descriptor_node = mesh_item.get("DescriptorName")
+        descriptor_ui = None
+        descriptor_name = None
+
+        if isinstance(descriptor_node, dict):
+            descriptor_ui = descriptor_node.get("@UI")
+            descriptor_name = descriptor_node.get("#text")
+        else:
+            descriptor_name = descriptor_node
+
+        # Priority: UI > Name
+        key_seed = descriptor_ui if descriptor_ui else descriptor_name
+
+        # If both are null (unlikely but possible), this would fail in pure SQL unless handled.
+        # The SQL uses COALESCE, so if both are null, it might be null or error depending on uuid function.
+        # uuid_generate_v5 requires a string. If key is null, it returns null.
+        if key_seed is None:
+            return None  # type: ignore
+
+        return str(uuid.uuid5(uuid.NAMESPACE_DNS, key_seed))
+
+    def test_mesh_identity_resolution(self) -> None:
+        """Verify deterministic ID generation for MeSH terms."""
+        # Case 1: Standard MeSH with UI
+        mesh_1 = {"DescriptorName": {"#text": "Brain", "@UI": "D001921"}}
+        uuid_1 = self._generate_mesh_id_sql_logic(mesh_1)
+
+        # Expected: UUIDv5(DNS, "D001921")
+        expected_1 = str(uuid.uuid5(uuid.NAMESPACE_DNS, "D001921"))
+        self.assertEqual(uuid_1, expected_1)
+
+        # Case 2: MeSH without UI (Fallback to Name)
+        mesh_2 = {"DescriptorName": "Neurons"}
+        uuid_2 = self._generate_mesh_id_sql_logic(mesh_2)
+
+        # Expected: UUIDv5(DNS, "Neurons")
+        expected_2 = str(uuid.uuid5(uuid.NAMESPACE_DNS, "Neurons"))
+        self.assertEqual(uuid_2, expected_2)
+        self.assertNotEqual(uuid_1, uuid_2)
+
+    def test_identity_resolution_edge_cases(self) -> None:
+        """Verify robustness against Unicode, Whitespace, and Special Characters."""
+
+        # --- Unicode Handling ---
+        # Author: "Ménière"
+        author_unicode = {"LastName": "Ménière", "ForeName": "P", "Initials": "P"}
+        uuid_unicode_auth = self._generate_author_id_sql_logic(author_unicode)
+
+        # Verify it generates a valid UUID and doesn't crash
+        self.assertIsNotNone(uuid_unicode_auth)
+        # Verify determinism
+        self.assertEqual(uuid_unicode_auth, self._generate_author_id_sql_logic(author_unicode))
+
+        # MeSH: "José"
+        mesh_unicode = {"DescriptorName": "José"}
+        uuid_unicode_mesh = self._generate_mesh_id_sql_logic(mesh_unicode)
+        self.assertEqual(uuid_unicode_mesh, str(uuid.uuid5(uuid.NAMESPACE_DNS, "José")))
+
+        # --- Whitespace Handling ---
+        # " Smith " vs "Smith"
+        # The current logic does NOT trim. Verify that.
+        author_space = {"LastName": " Smith ", "ForeName": "John", "Initials": "JD"}
+        author_clean = {"LastName": "Smith", "ForeName": "John", "Initials": "JD"}
+
+        self.assertNotEqual(
+            self._generate_author_id_sql_logic(author_space),
+            self._generate_author_id_sql_logic(author_clean),
+            "Whitespace should NOT be trimmed automatically, resulting in different IDs"
+        )
+
+        # --- Separator Collision (The Pipe Problem) ---
+        # Author A: Last="Smith|Jones", Fore="Bob", Init="B" -> "Smith|Jones|Bob|B"
+        # Author B: Last="Smith", Fore="Jones|Bob", Init="B" -> "Smith|Jones|Bob|B"
+        # These WILL collide with the current logic.
+        # We accept this risk for now, but we document it with this test.
+        author_a = {"LastName": "Smith|Jones", "ForeName": "Bob", "Initials": "B"}
+        author_b = {"LastName": "Smith", "ForeName": "Jones|Bob", "Initials": "B"}
+
+        self.assertEqual(
+            self._generate_author_id_sql_logic(author_a),
+            self._generate_author_id_sql_logic(author_b),
+            "Separator collision confirmed: Pipes in data mimic the separator."
+        )
+
     def _flatten_mesh_sql_logic(self, mesh_terms_json: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Mimics logic in `gold_pubmed_mesh.sql`.
