@@ -8,16 +8,17 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
+import re
 import unittest
 from io import BytesIO
-import re
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
 
+
 # Helper to simulate SQL extracted Year
-def extract_year_sql_simulation(pub_date: dict) -> Optional[str]:
-    """
+def extract_year_sql_simulation(pub_date: Dict[str, Any]) -> Optional[str]:
+    r"""
     Simulates the SQL logic:
     coalesce(
         raw_data -> ... -> 'Year',
@@ -25,14 +26,15 @@ def extract_year_sql_simulation(pub_date: dict) -> Optional[str]:
     )
     """
     if "Year" in pub_date:
-        return pub_date["Year"]
+        return str(pub_date["Year"])
 
     medline_date = pub_date.get("MedlineDate")
     if medline_date:
-        match = re.search(r'\d{4}', medline_date)
+        match = re.search(r"\d{4}", medline_date)
         if match:
             return match.group(0)
     return None
+
 
 class TestAdditionalComplexCases(unittest.TestCase):
     """
@@ -86,10 +88,10 @@ class TestAdditionalComplexCases(unittest.TestCase):
         cases = [
             ("2000 Spring", "2000"),
             ("Winter 2001", "2001"),
-            ("1999 Dec-2000 Jan", "1999"), # Regex finds first 4 digits
+            ("1999 Dec-2000 Jan", "1999"),  # Regex finds first 4 digits
             ("2005 May 23-25", "2005"),
             ("2008 Oct-Nov", "2008"),
-            ("Copyright 2010", "2010"), # Unlikely but tests regex
+            ("Copyright 2010", "2010"),  # Unlikely but tests regex
         ]
 
         for date_str, expected_year in cases:
@@ -109,7 +111,7 @@ class TestAdditionalComplexCases(unittest.TestCase):
                         </Article>
                     </MedlineCitation>
                 </PubmedArticleSet>
-                """.encode('utf-8')
+                """.encode("utf-8")
 
                 stream = BytesIO(xml_content)
                 records = list(parse_pubmed_xml(stream))
@@ -119,20 +121,20 @@ class TestAdditionalComplexCases(unittest.TestCase):
                 self.assertEqual(extracted_year, expected_year)
 
     def test_publication_year_dirty_data(self) -> None:
-        """
+        r"""
         Verify that our SQL regex safe cast logic would handle dirty data.
         This test simulates the SQL logic: case when pub_year ~ '^\d+$' ...
         """
 
         def safe_cast_year_simulation(year_val: str) -> Optional[int]:
             # Regex: ^\d+$
-            if re.match(r'^\d+$', year_val):
+            if re.match(r"^\d+$", year_val):
                 return int(year_val)
             return None
 
         self.assertEqual(safe_cast_year_simulation("2023"), 2023)
         self.assertIsNone(safe_cast_year_simulation("2023a"))
-        self.assertIsNone(safe_cast_year_simulation("2023-01")) # Strict digit check
+        self.assertIsNone(safe_cast_year_simulation("2023-01"))  # Strict digit check
         self.assertIsNone(safe_cast_year_simulation("Unknown"))
 
     def test_mixed_content_flattening_complex(self) -> None:
