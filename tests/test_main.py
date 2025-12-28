@@ -11,7 +11,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from coreason_etl_pubmedabstracts.main import get_args, run_pipeline
+from coreason_etl_pubmedabstracts.main import get_args, main, run_pipeline
 
 
 class TestMainOrchestration(unittest.TestCase):
@@ -104,5 +104,39 @@ class TestMainOrchestration(unittest.TestCase):
         mock_p_instance.run.return_value = mock_info
 
         run_pipeline("all")
+
+        mock_exit.assert_called_once_with(1)
+
+    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+    def test_run_pipeline_no_resources(self, mock_pipeline: MagicMock) -> None:
+        """Test run_pipeline with invalid or empty target triggers warning and return."""
+        mock_p_instance = MagicMock()
+        mock_pipeline.return_value = mock_p_instance
+
+        # 'none' or any string not in logic will result in empty resources list
+        run_pipeline("invalid_target")
+
+        # Should not run
+        mock_p_instance.run.assert_not_called()
+
+    @patch("coreason_etl_pubmedabstracts.main.get_args")
+    @patch("coreason_etl_pubmedabstracts.main.run_pipeline")
+    def test_main_success(self, mock_run: MagicMock, mock_args: MagicMock) -> None:
+        """Test main() success path."""
+        mock_args.return_value.load = "all"
+        mock_args.return_value.dry_run = False
+
+        main()
+
+        mock_run.assert_called_once_with("all", False)
+
+    @patch("coreason_etl_pubmedabstracts.main.get_args")
+    @patch("coreason_etl_pubmedabstracts.main.run_pipeline")
+    @patch("coreason_etl_pubmedabstracts.main.sys.exit")
+    def test_main_exception(self, mock_exit: MagicMock, mock_run: MagicMock, mock_args: MagicMock) -> None:
+        """Test main() exception handling."""
+        mock_run.side_effect = Exception("Boom")
+
+        main()
 
         mock_exit.assert_called_once_with(1)
