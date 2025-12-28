@@ -53,41 +53,60 @@ def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
     Yields:
         Dictionary representations of the XML elements.
     """
-    # iterparse events: 'end' is sufficient for complete elements.
-    # We do not filter by tag in iterparse arguments to handle namespaces robustly.
-    context = etree.iterparse(file_stream, events=("end",))
+    # Check for empty stream to prevent XMLSyntaxError
+    try:
+        if file_stream.seekable():
+            pos = file_stream.tell()
+            if not file_stream.read(1):
+                return
+            file_stream.seek(pos)
+    except Exception:
+        # Stream might not be seekable, fall back to try-except on iterparse
+        pass
 
-    for _event, elem in context:
-        # Strip namespace to check the tag name
-        # lxml tags are like "{http://namespace}TagName" or just "TagName"
-        tag_name = etree.QName(elem).localname
+    try:
+        # iterparse events: 'end' is sufficient for complete elements.
+        # We do not filter by tag in iterparse arguments to handle namespaces robustly.
+        context = etree.iterparse(file_stream, events=("end",))
 
-        if tag_name in ("MedlineCitation", "DeleteCitation"):
-            # Flatten mixed content in specific text-heavy fields
-            # This prevents xmltodict from splitting text due to internal tags like <i>, <b>, <sup>.
-            # We strip child tags but preserve their text content.
-            # Use local-name() to handle namespaces robustly (e.g. ns:ArticleTitle vs ArticleTitle)
-            for tag in ("ArticleTitle", "AbstractText", "VernacularTitle", "Affiliation"):
-                for node in elem.xpath(f".//*[local-name()='{tag}']"):
-                    # Strip all child tags (preserving text)
-                    etree.strip_tags(node, "*")
+        for _event, elem in context:
+            # Strip namespace to check the tag name
+            # lxml tags are like "{http://namespace}TagName" or just "TagName"
+            tag_name = etree.QName(elem).localname
 
-            # Convert the lxml element to a string
-            xml_str = etree.tostring(elem, encoding="unicode")
+            if tag_name in ("MedlineCitation", "DeleteCitation"):
+                # Flatten mixed content in specific text-heavy fields
+                # This prevents xmltodict from splitting text due to internal tags like <i>, <b>, <sup>.
+                # We strip child tags but preserve their text content.
+                # Use local-name() to handle namespaces robustly (e.g. ns:ArticleTitle vs ArticleTitle)
+                for tag in ("ArticleTitle", "AbstractText", "VernacularTitle", "Affiliation"):
+                    for node in elem.xpath(f".//*[local-name()='{tag}']"):
+                        # Strip all child tags (preserving text)
+                        etree.strip_tags(node, "*")
 
-            # Parse with xmltodict, forcing specific keys to be lists
-            doc = xmltodict.parse(xml_str, force_list=FORCE_LIST_KEYS)
+                # Convert the lxml element to a string
+                xml_str = etree.tostring(elem, encoding="unicode")
 
-            # Inject _record_type based on the known tag name
-            if tag_name == "MedlineCitation":
-                doc["_record_type"] = "citation"
-            elif tag_name == "DeleteCitation":
-                doc["_record_type"] = "delete"
+                # Parse with xmltodict, forcing specific keys to be lists
+                doc = xmltodict.parse(xml_str, force_list=FORCE_LIST_KEYS)
 
-            yield doc
+                # Inject _record_type based on the known tag name
+                if tag_name == "MedlineCitation":
+                    doc["_record_type"] = "citation"
+                elif tag_name == "DeleteCitation":
+                    doc["_record_type"] = "delete"
 
-            # Important: Clear the element to save memory
-            elem.clear()
-            # Also clear the references to previous siblings from the root
-            while elem.getprevious() is not None:
-                del elem.getparent()[0]
+                yield doc
+
+                # Important: Clear the element to save memory
+                elem.clear()
+                # Also clear the references to previous siblings from the root
+                while elem.getprevious() is not None:
+                    del elem.getparent()[0]
+
+    except etree.XMLSyntaxError as e:
+        # Handle empty files that might not have been caught by seek check
+        # "no element found" is raised for empty documents or documents with only comments
+        if "no element found" in str(e):
+            return
+        raise
