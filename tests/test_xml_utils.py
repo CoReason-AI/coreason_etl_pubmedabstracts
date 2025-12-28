@@ -35,6 +35,8 @@ class TestXmlUtils(unittest.TestCase):
 
         self.assertEqual(len(records), 1)
         self.assertIn("MedlineCitation", records[0])
+        self.assertEqual(records[0]["_record_type"], "citation")
+
         # PMID should be a list now because of FORCE_LIST_KEYS
         self.assertIsInstance(records[0]["MedlineCitation"]["PMID"], list)
         self.assertEqual(records[0]["MedlineCitation"]["PMID"][0]["#text"], "123456")
@@ -54,6 +56,8 @@ class TestXmlUtils(unittest.TestCase):
         self.assertEqual(len(records), 1)
         # DeleteCitation is in FORCE_LIST_KEYS, so it is a list
         self.assertIsInstance(records[0]["DeleteCitation"], list)
+        self.assertEqual(records[0]["_record_type"], "delete")
+
         delete_citation = records[0]["DeleteCitation"][0]
 
         # PMID is in FORCE_LIST_KEYS, so it is a list
@@ -81,8 +85,13 @@ class TestXmlUtils(unittest.TestCase):
 
         self.assertEqual(len(records), 3)
         self.assertIn("MedlineCitation", records[0])
+        self.assertEqual(records[0]["_record_type"], "citation")
+
         self.assertIn("DeleteCitation", records[1])
+        self.assertEqual(records[1]["_record_type"], "delete")
+
         self.assertIn("MedlineCitation", records[2])
+        self.assertEqual(records[2]["_record_type"], "citation")
 
     def test_normalization_force_list(self) -> None:
         """Test that specified keys are always lists even if single."""
