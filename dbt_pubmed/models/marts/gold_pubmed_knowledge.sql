@@ -17,6 +17,7 @@ final as (
         source_id,
         coreason_id,
         title,
+        doi,
 
         abstract_text,
 

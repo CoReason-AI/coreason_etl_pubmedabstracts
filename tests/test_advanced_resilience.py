@@ -92,15 +92,19 @@ class TestAdvancedResilience(unittest.TestCase):
         self.assertTrue(note["#text"].startswith("This is a note with"))
         self.assertIn("b", note)
 
+    @patch("coreason_etl_pubmedabstracts.pipelines.xml_utils.etree.QName")
     @patch("coreason_etl_pubmedabstracts.pipelines.xml_utils.etree.iterparse")
     @patch("coreason_etl_pubmedabstracts.pipelines.xml_utils.etree.tostring")
-    def test_memory_clearing(self, mock_tostring: MagicMock, mock_iterparse: MagicMock) -> None:
+    def test_memory_clearing(self, mock_tostring: MagicMock, mock_iterparse: MagicMock, mock_qname: MagicMock) -> None:
         """
         Verify that elem.clear() and parent cleanup are called to prevent memory leaks.
         """
         # Setup the mock element
         mock_elem = MagicMock()
         mock_parent = MagicMock()
+
+        # Mock QName to return "MedlineCitation"
+        mock_qname.return_value.localname = "MedlineCitation"
 
         # Setup parent behavior
         # getparent() returns mock_parent
