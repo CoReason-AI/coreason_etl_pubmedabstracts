@@ -166,10 +166,10 @@ class TestXmlUtils(unittest.TestCase):
         # Whitespace handling in lxml/xmltodict can be tricky, so we strip
         # But generally, it should concatenate text.
         # "Usage of " + "italics" + " and " + "bold" + " in titles."
-        self.assertIn("Usage of italics and bold in titles.", title.replace('\n', ' ').replace('  ', ' '))
+        self.assertIn("Usage of italics and bold in titles.", title.replace("\n", " ").replace("  ", " "))
 
         abstract = records[0]["MedlineCitation"]["Article"]["Abstract"]["AbstractText"]
-        self.assertIn("This is a subscript test.", abstract.replace('\n', ' ').replace('  ', ' '))
+        self.assertIn("This is a subscript test.", abstract.replace("\n", " ").replace("  ", " "))
 
     def test_namespace_robustness(self) -> None:
         """Test that we can handle namespaces and still flatten mixed content."""
@@ -197,13 +197,16 @@ class TestXmlUtils(unittest.TestCase):
         title = citation["ns:Article"]["ns:ArticleTitle"]
 
         # Verify flattening worked (<i> tag stripped)
-        self.assertIn("Namespace mixed content.", title.replace('\n', ' ').replace('  ', ' '))
+        self.assertIn("Namespace mixed content.", title.replace("\n", " ").replace("  ", " "))
         # Verify <i> is gone
         self.assertNotIn("<i>", title)
 
     def test_utf8_encoding(self) -> None:
         """Test that UTF-8 characters are preserved."""
-        xml_content = "    <PubmedArticleSet><MedlineCitation><Article><ArticleTitle>Café étude</ArticleTitle></Article></MedlineCitation></PubmedArticleSet>".encode('utf-8')
+        xml_content = (
+            "    <PubmedArticleSet><MedlineCitation><Article><ArticleTitle>Café étude</ArticleTitle></Article>"
+            "</MedlineCitation></PubmedArticleSet>".encode("utf-8")
+        )
 
         stream = BytesIO(xml_content)
         records = list(parse_pubmed_xml(stream))
