@@ -92,7 +92,7 @@ class TestComplianceHardDelete(unittest.TestCase):
         The system must not contain the paper after the delete batch is processed.
         """
         # Initial State: Paper 12345 exists
-        existing = [{"source_id": "12345", "ingestion_ts": 100.0, "title": "Valid Science"}]
+        existing: List[Dict[str, Any]] = [{"source_id": "12345", "ingestion_ts": 100.0, "title": "Valid Science"}]
 
         # Batch: Retraction notice arrives
         batch = [{"pmid": "12345", "operation": "delete", "ingestion_ts": 110.0, "file_name": "pubmed24n0100.xml.gz"}]
@@ -124,3 +124,108 @@ class TestComplianceHardDelete(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["source_id"], "12345")
         self.assertEqual(result[0]["title"], "Reinstated Science")
+
+    def test_complex_sequence_same_batch(self) -> None:
+        """
+        Scenario: Multiple updates for the same PMID within the same batch.
+        Sequence: Upsert -> Delete -> Upsert (Latest should win).
+        """
+        existing: List[Dict[str, Any]] = []
+
+        # All in same batch (watermark < 110)
+        batch = [
+            {"pmid": "A", "operation": "upsert", "ingestion_ts": 110.0, "file_name": "f1"},
+            {"pmid": "A", "operation": "delete", "ingestion_ts": 111.0, "file_name": "f1"},
+            {"pmid": "A", "operation": "upsert", "ingestion_ts": 112.0, "file_name": "f1"},
+        ]
+
+        result = self._simulate_incremental_delete(existing, batch, watermark_ts=100.0)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["source_id"], "A")
+        # Ensure timestamp reflects the LATEST upsert
+        self.assertEqual(result[0]["ingestion_ts"], 112.0)
+
+    def test_watermark_boundary_precision(self) -> None:
+        """
+        Scenario: Verify strict inequality for watermark logic.
+        Records exactly equal to watermark should be ignored (assumed already processed).
+        """
+        existing: List[Dict[str, Any]] = [{"source_id": "B", "ingestion_ts": 100.0}]
+
+        batch = [
+            # Exactly watermark -> Ignore (Safety mechanism to avoid reprocessing)
+            {"pmid": "B", "operation": "delete", "ingestion_ts": 100.0, "file_name": "f1"},
+            # Just above -> Process
+            {"pmid": "C", "operation": "upsert", "ingestion_ts": 100.0001, "file_name": "f1"},
+        ]
+
+        result = self._simulate_incremental_delete(existing, batch, watermark_ts=100.0)
+
+        # B should still exist (Delete ignored)
+        # C should be added
+        self.assertEqual(len(result), 2)
+        ids = {r["source_id"] for r in result}
+        self.assertIn("B", ids)
+        self.assertIn("C", ids)
+
+    def test_file_name_tie_breaking(self) -> None:
+        """
+        Scenario: Timestamps are identical, use Filename as tie breaker.
+        Alphanumeric sort: pubmed24n0002 > pubmed24n0001
+        """
+        existing: List[Dict[str, Any]] = []
+
+        batch = [
+            # Logically 'later' file, same second
+            {"pmid": "D", "operation": "delete", "ingestion_ts": 200.0, "file_name": "pubmed24n0002.xml"},
+            # Logically 'earlier' file, same second
+            {"pmid": "D", "operation": "upsert", "ingestion_ts": 200.0, "file_name": "pubmed24n0001.xml"},
+        ]
+
+        # Expected: Delete wins because filename is greater
+        result = self._simulate_incremental_delete(existing, batch, watermark_ts=100.0)
+
+        self.assertEqual(len(result), 0)
+
+    def test_idempotency_of_deletes(self) -> None:
+        """
+        Scenario: Deleting a record that doesn't exist should be fine (No-op).
+        """
+        existing: List[Dict[str, Any]] = [{"source_id": "X", "ingestion_ts": 100.0}]
+
+        batch = [{"pmid": "Y", "operation": "delete", "ingestion_ts": 110.0, "file_name": "f1"}]
+
+        result = self._simulate_incremental_delete(existing, batch, watermark_ts=105.0)
+
+        # X remains. Y delete was a no-op on existing state.
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["source_id"], "X")
+
+    def test_mixed_batch_bulk(self) -> None:
+        """
+        Scenario: A mix of inserts, updates, and deletes to verify no cross-talk.
+        """
+        existing: List[Dict[str, Any]] = [
+            {"source_id": "KEEP", "ingestion_ts": 100.0},
+            {"source_id": "UPDATE", "ingestion_ts": 100.0},
+            {"source_id": "DELETE", "ingestion_ts": 100.0},
+        ]
+
+        batch = [
+            {"pmid": "UPDATE", "operation": "upsert", "ingestion_ts": 110.0, "file_name": "f1", "title": "New Title"},
+            {"pmid": "DELETE", "operation": "delete", "ingestion_ts": 110.0, "file_name": "f1"},
+            {"pmid": "NEW", "operation": "upsert", "ingestion_ts": 110.0, "file_name": "f1"},
+            # OLD noise that should be ignored by watermark
+            {"pmid": "KEEP", "operation": "delete", "ingestion_ts": 90.0, "file_name": "f1"},
+        ]
+
+        result = self._simulate_incremental_delete(existing, batch, watermark_ts=105.0)
+
+        res_map = {r["source_id"]: r for r in result}
+
+        self.assertIn("KEEP", res_map)  # Old delete ignored
+        self.assertIn("UPDATE", res_map)
+        self.assertEqual(res_map["UPDATE"]["title"], "New Title")
+        self.assertNotIn("DELETE", res_map)
+        self.assertIn("NEW", res_map)
