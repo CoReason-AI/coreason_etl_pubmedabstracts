@@ -259,3 +259,54 @@ class TestXmlUtils(unittest.TestCase):
         stream = BytesIO(b"<root>unclosed")
         with self.assertRaises(etree.XMLSyntaxError):
             list(parse_pubmed_xml(stream))
+
+    def test_non_seekable_empty_stream(self) -> None:
+        """
+        Test that an empty, non-seekable stream is handled gracefully.
+        This covers the 'except Exception' block in the seek check
+        and the 'except XMLSyntaxError' block in iterparse.
+        """
+
+        class NonSeekableStream:
+            def __init__(self, data: bytes):
+                self._data = BytesIO(data)
+
+            def read(self, size: int = -1) -> bytes:
+                return self._data.read(size)
+
+            def seekable(self) -> bool:
+                # Raise exception to trigger the try-except block in xml_utils.py
+                raise OSError("Checking seekability failed")
+
+            def tell(self) -> int:
+                raise OSError("Not seekable")
+
+            def seek(self, offset: int, whence: int = 0) -> int:
+                raise OSError("Not seekable")
+
+        stream = NonSeekableStream(b"")
+        # Explicitly cast to IO[bytes] because our mock is simple
+        from typing import cast
+        from typing import IO
+        records = list(parse_pubmed_xml(cast(IO[bytes], stream)))
+        self.assertEqual(records, [])
+
+    def test_non_seekable_malformed_xml(self) -> None:
+        """Test that a non-seekable malformed stream still raises XMLSyntaxError."""
+        from lxml import etree
+
+        class NonSeekableStream:
+            def __init__(self, data: bytes):
+                self._data = BytesIO(data)
+
+            def read(self, size: int = -1) -> bytes:
+                return self._data.read(size)
+
+            def seekable(self) -> bool:
+                return False
+
+        stream = NonSeekableStream(b"<root>unclosed")
+        from typing import cast
+        from typing import IO
+        with self.assertRaises(etree.XMLSyntaxError):
+            list(parse_pubmed_xml(cast(IO[bytes], stream)))

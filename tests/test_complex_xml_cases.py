@@ -19,12 +19,10 @@ from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
 class TestComplexXmlCases(unittest.TestCase):
     def test_empty_stream(self) -> None:
         """Test handling of an empty stream."""
-        # An empty stream isn't valid XML, so iterparse might raise an error immediately
-        # or just yield nothing if the file is truly 0 bytes but iterparse expects a root.
-        # Actually lxml iterparse raises XMLSyntaxError on empty input usually.
+        # An empty stream isn't valid XML, but our parser is configured to handle it gracefully.
         stream = BytesIO(b"")
-        with self.assertRaises(etree.XMLSyntaxError):
-            list(parse_pubmed_xml(stream))
+        records = list(parse_pubmed_xml(stream))
+        self.assertEqual(records, [])
 
     def test_malformed_xml(self) -> None:
         """Test handling of malformed XML."""
