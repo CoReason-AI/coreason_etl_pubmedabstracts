@@ -54,8 +54,8 @@ class TestEdgeCases(unittest.TestCase):
         """
         Verify handling of namespaces.
 
-        Note: xmltodict preserves namespace prefixes in the keys unless configured otherwise.
-        This test checks how the current parser handles this.
+        We expect the parser to correctly identify the record type even with namespaces,
+        and inject `_record_type`. Keys will still have prefixes as per xmltodict default.
         """
         xml_content = b"""
         <ns:PubmedArticleSet xmlns:ns="http://example.com/ns">
@@ -70,28 +70,11 @@ class TestEdgeCases(unittest.TestCase):
         self.assertEqual(len(records), 1)
         record = records[0]
 
-        # Since xmltodict preserves prefixes, we expect keys like "ns:MedlineCitation".
-        # However, our parser logic checks `if "MedlineCitation" in doc`.
-        # This check will FAIL for "ns:MedlineCitation".
-        # Therefore, _record_type will NOT be injected if the root tag has a prefix.
-
-        # To make this test pass with the CURRENT implementation (verifying behavior),
-        # we assert that _record_type is MISSING.
-        # Ideally, we should fix the implementation to handle namespaces, but for this "Edge Case" test
-        # verifying current behavior is the first step.
-
-        # Checking actual content
+        # xmltodict preserves prefixes
         self.assertIn("ns:MedlineCitation", record)
 
-        # If we wanted to support this, we'd need to update xml_utils.py.
-        # Given the requirements don't explicitly demand arbitrary namespace support
-        # (NLM XML is well-defined), documenting this behavior via test is sufficient for now.
-        # But wait, if _record_type is missing, downstream might fail.
-        # Since this is an edge case test, failing to inject is acceptable IF we don't expect this input.
-        # But strict correctness implies we should handle it or fail.
-
-        # Let's verify it is indeed missing.
-        self.assertNotIn("_record_type", record)
+        # Updated behavior: _record_type IS injected correctly
+        self.assertEqual(record.get("_record_type"), "citation")
 
     def test_root_attributes_preservation(self) -> None:
         """
