@@ -8,8 +8,135 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
-from coreason_etl_pubmedabstracts.main import hello_world
+import unittest
+from unittest.mock import MagicMock, patch
+
+from coreason_etl_pubmedabstracts.main import get_args, main, run_pipeline
 
 
-def test_hello_world() -> None:
-    assert hello_world() == "Hello World!"
+class TestMainOrchestration(unittest.TestCase):
+    def test_get_args(self) -> None:
+        """Test argument parsing."""
+        args = get_args(["--load", "baseline"])
+        self.assertEqual(args.load, "baseline")
+        self.assertFalse(args.dry_run)
+
+        args = get_args(["--dry-run"])
+        self.assertEqual(args.load, "all")
+        self.assertTrue(args.dry_run)
+
+    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
+    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+    def test_run_pipeline_all(self, mock_source: MagicMock, mock_sweep: MagicMock, mock_pipeline: MagicMock) -> None:
+        """Test running all resources triggers sweep."""
+        # Setup mock pipeline
+        mock_p_instance = MagicMock()
+        mock_pipeline.return_value = mock_p_instance
+
+        # Setup successful load info
+        mock_info = MagicMock()
+        mock_info.has_failed_jobs = False
+        mock_p_instance.run.return_value = mock_info
+
+        # Execute
+        run_pipeline("all")
+
+        # Verify pipeline init
+        mock_pipeline.assert_called_once_with(
+            pipeline_name="pubmed_abstracts",
+            destination="postgres",
+            dataset_name="pubmed",
+            progress="log",
+        )
+
+        # Verify run called with both resources
+        # dlt.run(source, table_name=...) logic
+        # table_name argument matches our resources_to_run list
+        mock_p_instance.run.assert_called_once()
+        _, kwargs = mock_p_instance.run.call_args
+        self.assertEqual(kwargs["table_name"], ["pubmed_baseline", "pubmed_updates"])
+
+        # Verify sweep called
+        mock_sweep.assert_called_once_with(mock_p_instance)
+
+    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
+    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+    def test_run_pipeline_updates_only(
+        self, mock_source: MagicMock, mock_sweep: MagicMock, mock_pipeline: MagicMock
+    ) -> None:
+        """Test running only updates does NOT trigger sweep."""
+        mock_p_instance = MagicMock()
+        mock_pipeline.return_value = mock_p_instance
+        mock_info = MagicMock()
+        mock_info.has_failed_jobs = False
+        mock_p_instance.run.return_value = mock_info
+
+        run_pipeline("updates")
+
+        # Verify run called with updates only
+        _, kwargs = mock_p_instance.run.call_args
+        self.assertEqual(kwargs["table_name"], ["pubmed_updates"])
+
+        # Verify sweep NOT called
+        mock_sweep.assert_not_called()
+
+    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
+    def test_dry_run(self, mock_sweep: MagicMock, mock_pipeline: MagicMock) -> None:
+        """Test dry run skips execution."""
+        run_pipeline("all", dry_run=True)
+
+        mock_pipeline.assert_called_once()
+        mock_pipeline.return_value.run.assert_not_called()
+        mock_sweep.assert_not_called()
+
+    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+    @patch("coreason_etl_pubmedabstracts.main.sys.exit")
+    def test_failed_jobs_exit(self, mock_exit: MagicMock, mock_pipeline: MagicMock) -> None:
+        """Test that failed jobs trigger sys.exit(1)."""
+        mock_p_instance = MagicMock()
+        mock_pipeline.return_value = mock_p_instance
+
+        mock_info = MagicMock()
+        mock_info.has_failed_jobs = True
+        mock_p_instance.run.return_value = mock_info
+
+        run_pipeline("all")
+
+        mock_exit.assert_called_once_with(1)
+
+    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+    def test_run_pipeline_no_resources(self, mock_pipeline: MagicMock) -> None:
+        """Test run_pipeline with invalid or empty target triggers warning and return."""
+        mock_p_instance = MagicMock()
+        mock_pipeline.return_value = mock_p_instance
+
+        # 'none' or any string not in logic will result in empty resources list
+        run_pipeline("invalid_target")
+
+        # Should not run
+        mock_p_instance.run.assert_not_called()
+
+    @patch("coreason_etl_pubmedabstracts.main.get_args")
+    @patch("coreason_etl_pubmedabstracts.main.run_pipeline")
+    def test_main_success(self, mock_run: MagicMock, mock_args: MagicMock) -> None:
+        """Test main() success path."""
+        mock_args.return_value.load = "all"
+        mock_args.return_value.dry_run = False
+
+        main()
+
+        mock_run.assert_called_once_with("all", False)
+
+    @patch("coreason_etl_pubmedabstracts.main.get_args")
+    @patch("coreason_etl_pubmedabstracts.main.run_pipeline")
+    @patch("coreason_etl_pubmedabstracts.main.sys.exit")
+    def test_main_exception(self, mock_exit: MagicMock, mock_run: MagicMock, mock_args: MagicMock) -> None:
+        """Test main() exception handling."""
+        mock_run.side_effect = Exception("Boom")
+
+        main()
+
+        mock_exit.assert_called_once_with(1)
