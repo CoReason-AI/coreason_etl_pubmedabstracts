@@ -8,6 +8,8 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
+from typing import Any, Dict, List
+
 
 def test_stg_pubmed_citations_union_logic() -> None:
     """
@@ -51,6 +53,84 @@ def test_stg_pubmed_citations_union_logic() -> None:
     assert unioned_results[0]["operation"] == "upsert"
     assert unioned_results[2]["pmid"] == "1"
     assert unioned_results[2]["operation"] == "delete"
+
+
+def test_union_all_preserves_duplicates() -> None:
+    """
+    Verify that if the exact same record exists in both baseline and updates
+    (e.g., edge case where a file was re-ingested or moved), UNION ALL preserves both.
+    This is important because deduplication happens downstream in int_pubmed_deduped.
+    """
+    record = {
+        "file_name": "duplicate.xml.gz",
+        "ingestion_ts": 100,
+        "pmid": "999",
+        "operation": "upsert",
+    }
+    baseline_records = [record]
+    updates_records = [record]
+
+    # Simulate UNION ALL
+    unioned_results = baseline_records + updates_records
+
+    assert len(unioned_results) == 2
+    assert unioned_results[0] == record
+    assert unioned_results[1] == record
+
+
+def test_union_all_empty_inputs() -> None:
+    """
+    Verify that the view handles empty tables gracefully.
+    """
+    # Case 1: Empty Baseline
+    baseline_empty: List[Dict[str, Any]] = []
+    updates = [{"pmid": "1"}]
+    res1 = baseline_empty + updates
+    assert len(res1) == 1
+
+    # Case 2: Empty Updates
+    baseline = [{"pmid": "2"}]
+    updates_empty: List[Dict[str, Any]] = []
+    res2 = baseline + updates_empty
+    assert len(res2) == 1
+
+    # Case 3: Both Empty
+    res3 = baseline_empty + updates_empty
+    assert len(res3) == 0
+
+
+def test_union_all_null_propagation() -> None:
+    """
+    Verify that NULL (None) values are correctly propagated.
+    In a UNION ALL, if one side has NULL for a column, it should appear as NULL in the result.
+    """
+    baseline_records = [
+        {
+            "pmid": "1",
+            "title": None,  # Explicit NULL
+            "doi": "10.1000/1",
+        }
+    ]
+    updates_records = [
+        {
+            "pmid": "2",
+            "title": "Has Title",
+            "doi": None,  # Explicit NULL
+        }
+    ]
+
+    unioned = baseline_records + updates_records
+
+    assert len(unioned) == 2
+    # Check baseline record in result
+    assert unioned[0]["pmid"] == "1"
+    assert unioned[0]["title"] is None
+    assert unioned[0]["doi"] == "10.1000/1"
+
+    # Check updates record in result
+    assert unioned[1]["pmid"] == "2"
+    assert unioned[1]["title"] == "Has Title"
+    assert unioned[1]["doi"] is None
 
 
 def test_int_pubmed_deduped_references_staging_view() -> None:
