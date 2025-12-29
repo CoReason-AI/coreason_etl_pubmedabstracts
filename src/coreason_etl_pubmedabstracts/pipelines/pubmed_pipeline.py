@@ -11,10 +11,11 @@
 import hashlib
 import json
 import time
-from typing import Any, Dict, Iterator
+from typing import Any, Dict, Iterator, Optional
 
 import dlt
 from dlt.sources import DltResource
+from loguru import logger
 
 from coreason_etl_pubmedabstracts.pipelines.ftp_utils import (
     list_remote_files,
@@ -62,7 +63,7 @@ def pubmed_baseline(host: str = "ftp.ncbi.nlm.nih.gov") -> Iterator[Dict[str, An
 
     # 2. Iterate and process
     for file_path in files:
-        # TODO: Add logging/progress
+        logger.info(f"Processing Baseline file: {file_path}")
         file_name = file_path.split("/")[-1]
 
         # 3. Open stream (decompression handled by open_remote_file/fsspec)
@@ -73,15 +74,33 @@ def pubmed_baseline(host: str = "ftp.ncbi.nlm.nih.gov") -> Iterator[Dict[str, An
 
 
 @dlt.resource(write_disposition="append", table_name="bronze_pubmed_updates")  # type: ignore[misc]
-def pubmed_updates(host: str = "ftp.ncbi.nlm.nih.gov") -> Iterator[Dict[str, Any]]:
+def pubmed_updates(
+    host: str = "ftp.ncbi.nlm.nih.gov",
+    last_file: Optional[dlt.sources.incremental[str]] = dlt.sources.incremental("file_name"),  # noqa: B008
+) -> Iterator[Dict[str, Any]]:
     """
     Resource for PubMed Updates.
     Iterates over all update files, parses them, and yields records.
+    Uses incremental loading to skip already processed files.
     """
     files = list_remote_files(host, "/pubmed/updatefiles/")
 
+    # Filter files based on incremental state
+    # last_file.last_value is the file_name (e.g., pubmed24n1001.xml.gz)
+    # files are full paths (e.g., /pubmed/updatefiles/pubmed24n1001.xml.gz)
+
+    start_value = last_file.last_value if last_file else None
+
     for file_path in files:
         file_name = file_path.split("/")[-1]
+
+        # Skip if file_name is <= last processed file
+        # Alphanumeric comparison works for standard pubmed naming (pubmedYYnXXXX)
+        if start_value and file_name <= start_value:
+            continue
+
+        logger.info(f"Processing Update file: {file_path}")
+
         with open_remote_file(host, file_path) as f:
             for record in parse_pubmed_xml(f):
                 yield _wrap_record(record, file_name)
