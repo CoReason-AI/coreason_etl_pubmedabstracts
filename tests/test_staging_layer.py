@@ -8,6 +8,7 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
+
 def test_stg_pubmed_citations_union_logic() -> None:
     """
     Verify that stg_pubmed_citations correctly unions baseline and updates.
