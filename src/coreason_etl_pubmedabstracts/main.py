@@ -13,10 +13,10 @@ import sys
 from typing import List, Optional
 
 import dlt
-from loguru import logger
 
 from coreason_etl_pubmedabstracts.pipelines.deduplication import run_deduplication_sweep
 from coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline import pubmed_source
+from coreason_etl_pubmedabstracts.utils.logger import logger
 
 
 def get_args(args: Optional[List[str]] = None) -> argparse.Namespace:
@@ -91,6 +91,7 @@ def run_pipeline(load_target: str, dry_run: bool = False) -> None:
         logger.info("Deduplication Sweep finished.")
 
 
+@logger.catch  # type: ignore
 def main() -> None:
     args = get_args()
     try:

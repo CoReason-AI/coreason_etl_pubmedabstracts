@@ -49,7 +49,7 @@ This project uses **Ruff** for Python linting/formatting, **Mypy** for typing, a
   * Run checks with: poetry run mypy .
   * Avoid Any wherever possible.
 * **Logging:** Use loguru instead of the standard logging module.
-  * *Good:* from loguru import logger -> logger.info("...")
+  * *Good:* from coreason_etl_pubmedabstracts.utils.logger import logger -> logger.info("...")
 * **Licensing:** Every .py file must start with the standard license header.
 
 ### **Legal & Intellectual Property**
@@ -101,6 +101,25 @@ Adhere to 12-Factor App principles. Use these standard variable names:
   * DOCKER_HOST: If interacting with the Docker engine.
   * SSH_PRIVATE_KEY / SSH_USER: If managing remote connections.
   * AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY: For AWS services.
+
+### **Logging & Observability**
+
+* **Standard:** `loguru` is the exclusive logging library. The standard `logging` module and `print()` statements are strictly prohibited.
+* **Architecture:** A centralized logger is configured in `src/coreason_etl_pubmedabstracts/utils/logger.py`. This ensures consistent formatting and output handling.
+* **Outputs:**
+  * **Console (Stderr):** Human-readable text format.
+  * **File (`logs/app.log`):** JSON format for machine ingestion. Logs are rotated (500 MB/10 days).
+* **Usage Example:**
+  ```python
+  from coreason_etl_pubmedabstracts.utils.logger import logger
+
+  # Inside an Agent/Function
+  logger.info("Agent started task")
+  try:
+      ...
+  except Exception:
+      logger.exception("Agent failed")
+  ```
 
 ### **CI/CD Context**
 
