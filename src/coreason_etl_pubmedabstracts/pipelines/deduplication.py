@@ -9,7 +9,8 @@
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
 import dlt
-from loguru import logger
+
+from coreason_etl_pubmedabstracts.utils.logger import logger
 
 
 def run_deduplication_sweep(pipeline: dlt.Pipeline) -> None:
