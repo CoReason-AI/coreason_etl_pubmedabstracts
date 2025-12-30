@@ -10,7 +10,7 @@
 
 import unittest
 from io import BytesIO
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
 from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
 
@@ -108,6 +108,106 @@ class TestSqlLogic(unittest.TestCase):
         pub_date = records[0]["MedlineCitation"]["Article"]["Journal"]["JournalIssue"]["PubDate"]
         self.assertEqual(pub_date["MedlineDate"], "Spring 2000")
         # SQL substring should find "2000".
+
+
+class TestStagingLayerJsonLogic(unittest.TestCase):
+    """
+    Tests the logic used in Staging Layer SQL (stg_pubmed_baseline.sql, stg_pubmed_updates.sql)
+    to handle the JSONB variants produced by XML parsing.
+
+    This ensures that the SQL logic (simulated here) correctly handles:
+    1. Strings (simple text elements)
+    2. Objects (elements with attributes)
+    3. Arrays (elements forced to list or repeating)
+    """
+
+    def _simulate_pmid_extraction(self, pmid_node: Any) -> str:
+        """
+        Simulates:
+        CASE
+            WHEN jsonb_typeof(raw_data -> 'MedlineCitation' -> 'PMID' -> 0) = 'string'
+            THEN raw_data -> 'MedlineCitation' -> 'PMID' ->> 0
+            ELSE raw_data -> 'MedlineCitation' -> 'PMID' -> 0 ->> '#text'
+        END
+        """
+        # Note: PMID is in FORCE_LIST_KEYS, so it's always a list in Python/JSON
+        first_item = pmid_node[0]
+        if isinstance(first_item, str):
+            return first_item
+        else:
+            return str(first_item["#text"])
+
+    def _simulate_title_extraction(self, title_node: Any) -> str:
+        """
+        Simulates:
+        CASE
+            WHEN jsonb_typeof(node) = 'string' THEN node
+            ELSE node ->> '#text'
+        END
+        """
+        if isinstance(title_node, str):
+            return title_node
+        return str(title_node["#text"])
+
+    def _simulate_abstract_extraction(self, abstract_node: Any) -> str:
+        """
+        Simulates AbstractText extraction logic.
+        """
+        if isinstance(abstract_node, str):
+            return abstract_node
+        elif isinstance(abstract_node, list):
+            # array elements: string_agg(coalesce(item ->> '#text', item), ' ')
+            parts = []
+            for item in abstract_node:
+                if isinstance(item, str):
+                    parts.append(item)
+                else:
+                    parts.append(item["#text"])
+            return " ".join(parts)
+        else:
+            # Object
+            return str(abstract_node["#text"])
+
+    def test_pmid_simple_string(self) -> None:
+        """Case: <PMID>12345</PMID> -> List of String"""
+        # Parsing: {'PMID': ['12345']}
+        data = ["12345"]
+        result = self._simulate_pmid_extraction(data)
+        self.assertEqual(result, "12345")
+
+    def test_pmid_with_attributes(self) -> None:
+        """Case: <PMID Version="1">12345</PMID> -> List of Object"""
+        # Parsing: {'PMID': [{'#text': '12345', '@Version': '1'}]}
+        data = [{"#text": "12345", "@Version": "1"}]
+        result = self._simulate_pmid_extraction(data)
+        self.assertEqual(result, "12345")
+
+    def test_article_title_simple(self) -> None:
+        """Case: <ArticleTitle>Hello World</ArticleTitle> -> String"""
+        data = "Hello World"
+        result = self._simulate_title_extraction(data)
+        self.assertEqual(result, "Hello World")
+
+    def test_article_title_complex(self) -> None:
+        """Case: <ArticleTitle lang="eng">Hello World</ArticleTitle> -> Object"""
+        data = {"#text": "Hello World", "@lang": "eng"}
+        result = self._simulate_title_extraction(data)
+        self.assertEqual(result, "Hello World")
+
+    def test_abstract_list_mixed(self) -> None:
+        """
+        Case: Multiple AbstractText elements, some with attributes.
+        <Abstract>
+            <AbstractText Label="BACKGROUND">Text 1</AbstractText>
+            <AbstractText>Text 2</AbstractText>
+        </Abstract>
+        """
+        data: List[Union[str, Dict[str, str]]] = [
+            {"#text": "Text 1", "@Label": "BACKGROUND"},
+            "Text 2",
+        ]
+        result = self._simulate_abstract_extraction(data)
+        self.assertEqual(result, "Text 1 Text 2")
 
 
 class TestPhysicalHardDeleteLogic(unittest.TestCase):
