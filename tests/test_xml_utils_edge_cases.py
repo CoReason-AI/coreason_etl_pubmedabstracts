@@ -10,11 +10,14 @@
 
 import unittest
 from io import BytesIO
+
 from lxml import etree
+
 from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
 
+
 class TestXmlUtilsEdgeCases(unittest.TestCase):
-    def test_truncated_xml_in_middle_of_tag(self):
+    def test_truncated_xml_in_middle_of_tag(self) -> None:
         """
         Test that XMLSyntaxError is raised if the stream is truncated
         in the middle of a tag.
@@ -25,7 +28,7 @@ class TestXmlUtilsEdgeCases(unittest.TestCase):
         with self.assertRaises(etree.XMLSyntaxError):
             list(parse_pubmed_xml(stream))
 
-    def test_cdata_handling(self):
+    def test_cdata_handling(self) -> None:
         """
         Test that CDATA sections are parsed correctly as text.
         """
@@ -44,7 +47,7 @@ class TestXmlUtilsEdgeCases(unittest.TestCase):
         title = records[0]["MedlineCitation"]["Article"]["ArticleTitle"]
         self.assertEqual(title, "Some <nested> markup")
 
-    def test_namespace_prefix_preservation(self):
+    def test_namespace_prefix_preservation(self) -> None:
         """
         Verify that namespaces are preserved in keys, which is crucial
         because our logic might expect specific keys.

@@ -9,21 +9,26 @@
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
 import os
-import unittest
-from unittest.mock import patch, MagicMock
-from io import BytesIO
-import dlt
-from testcontainers.postgres import PostgresContainer
-import psycopg2
 import subprocess
+import unittest
+from io import BytesIO
+from typing import Any
+from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
+
+import psycopg2
+from psycopg2.extensions import connection
+from testcontainers.postgres import PostgresContainer
 
 # Ensure we use the installed package
 from coreason_etl_pubmedabstracts.main import run_pipeline
 
+
 class TestFullStackIntegration(unittest.TestCase):
+    postgres: PostgresContainer
+
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls) -> None:
         """Spin up Postgres container."""
         cls.postgres = PostgresContainer("postgres:15-alpine")
         cls.postgres.start()
@@ -35,37 +40,45 @@ class TestFullStackIntegration(unittest.TestCase):
         # Parse connection url to set individual components
         res = urlparse(db_url)
 
-        os.environ["PGHOST"] = res.hostname
-        os.environ["PGPORT"] = str(res.port)
-        os.environ["PGUSER"] = res.username
-        os.environ["PGPASSWORD"] = res.password
-        os.environ["PGDATABASE"] = res.path.lstrip('/')
-        os.environ["PGSCHEMA"] = "public" # default
+        if res.hostname:
+            os.environ["PGHOST"] = res.hostname
+        if res.port:
+            os.environ["PGPORT"] = str(res.port)
+        if res.username:
+            os.environ["PGUSER"] = res.username
+        if res.password:
+            os.environ["PGPASSWORD"] = res.password
+        os.environ["PGDATABASE"] = res.path.lstrip("/")
+        os.environ["PGSCHEMA"] = "public"  # default
 
         # Set DBT env vars to match profiles.yml
-        os.environ["DBT_HOST"] = res.hostname
-        os.environ["DBT_PORT"] = str(res.port)
-        os.environ["DBT_USER"] = res.username
-        os.environ["DBT_PASS"] = res.password
-        os.environ["DBT_DBNAME"] = res.path.lstrip('/')
+        if res.hostname:
+            os.environ["DBT_HOST"] = res.hostname
+        if res.port:
+            os.environ["DBT_PORT"] = str(res.port)
+        if res.username:
+            os.environ["DBT_USER"] = res.username
+        if res.password:
+            os.environ["DBT_PASS"] = res.password
+        os.environ["DBT_DBNAME"] = res.path.lstrip("/")
         os.environ["DBT_SCHEMA"] = "public"
 
     @classmethod
-    def tearDownClass(cls):
+    def tearDownClass(cls) -> None:
         cls.postgres.stop()
 
-    def _get_db_connection(self):
+    def _get_db_connection(self) -> connection:
         return psycopg2.connect(
             host=os.environ["PGHOST"],
             port=os.environ["PGPORT"],
             user=os.environ["PGUSER"],
             password=os.environ["PGPASSWORD"],
-            dbname=os.environ["PGDATABASE"]
+            dbname=os.environ["PGDATABASE"],
         )
 
     @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.list_remote_files")
     @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.open_remote_file")
-    def test_full_pipeline_execution(self, mock_open, mock_list):
+    def test_full_pipeline_execution(self, mock_open: MagicMock, mock_list: MagicMock) -> None:
         """
         Runs the full pipeline:
         1. Ingest Baseline (mocked XML).
@@ -112,7 +125,7 @@ class TestFullStackIntegration(unittest.TestCase):
         """
 
         # Mock side_effect for open_remote_file to return different content based on filename
-        def open_side_effect(host, path):
+        def open_side_effect(host: str, path: str) -> Any:
             if "baseline" in path:
                 return MagicMock(__enter__=lambda _: BytesIO(baseline_xml))
             elif "update" in path:
@@ -122,16 +135,20 @@ class TestFullStackIntegration(unittest.TestCase):
         mock_open.side_effect = open_side_effect
 
         # Mock list to return our files
-        mock_list.side_effect = lambda host, dir, pattern="*.xml.gz": \
-            ["/pubmed/baseline/base.xml.gz"] if "baseline" in dir else \
-            ["/pubmed/updatefiles/update.xml.gz"]
+        mock_list.side_effect = (
+            lambda host, dir, pattern="*.xml.gz": ["/pubmed/baseline/base.xml.gz"]
+            if "baseline" in dir
+            else ["/pubmed/updatefiles/update.xml.gz"]
+        )
 
         # --- Execution ---
 
         # 1. Run Pipeline (Baseline + Updates + Dedup Sweep)
+        # Note: run_pipeline calls run_deduplication_sweep automatically if baseline is loaded.
         run_pipeline(load_target="all")
 
         # 2. Run dbt models (to materialize views/tables)
+        # We need to run `dbt build` to ensure models are created.
         subprocess.run(["dbt", "build", "--project-dir", "dbt_pubmed", "--profiles-dir", "dbt_pubmed"], check=True)
 
         # --- Verification ---
@@ -141,12 +158,17 @@ class TestFullStackIntegration(unittest.TestCase):
 
         # Check 1: Bronze Tables Existence
         cur.execute("SELECT count(*) FROM public.bronze_pubmed_baseline")
-        count_baseline = cur.fetchone()[0]
+        result = cur.fetchone()
+        count_baseline = result[0] if result else 0
         self.assertEqual(count_baseline, 2, "Baseline should have 2 records")
 
         # Check 2: Deduplication Sweep
+        # The update for PMID 100 should have been DELETED from bronze_pubmed_updates
+        # because it exists in baseline.
+        # Remaining in updates: PMID 300 (new), PMID 200 (delete request).
         cur.execute("SELECT count(*) FROM public.bronze_pubmed_updates")
-        count_updates = cur.fetchone()[0]
+        result = cur.fetchone()
+        count_updates = result[0] if result else 0
         self.assertEqual(count_updates, 2, "Updates should have 2 records (100 removed, 300 and 200-del remain)")
 
         # Verify content of updates
@@ -163,7 +185,8 @@ class TestFullStackIntegration(unittest.TestCase):
         # Should combine Baseline + Updates
         # Total rows: Baseline(100, 200) + Updates(300, 200-del) = 4 rows in the UNION
         cur.execute("SELECT count(*) FROM public.stg_pubmed_citations")
-        count_stg = cur.fetchone()[0]
+        result = cur.fetchone()
+        count_stg = result[0] if result else 0
         self.assertEqual(count_stg, 4)
 
         cur.close()
@@ -171,7 +194,7 @@ class TestFullStackIntegration(unittest.TestCase):
 
     @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.list_remote_files")
     @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.open_remote_file")
-    def test_complex_scenarios(self, mock_open, mock_list):
+    def test_complex_scenarios(self, mock_open: MagicMock, mock_list: MagicMock) -> None:
         """
         Tests complex edge cases:
         1. Unicode preservation.
@@ -199,7 +222,7 @@ class TestFullStackIntegration(unittest.TestCase):
         # Empty XML (valid root, no children)
         empty_xml = b"<PubmedArticleSet></PubmedArticleSet>"
 
-        def open_side_effect(host, path):
+        def open_side_effect(host: str, path: str) -> Any:
             if "complex" in path:
                 return MagicMock(__enter__=lambda _: BytesIO(complex_xml))
             elif "empty" in path:
@@ -208,9 +231,11 @@ class TestFullStackIntegration(unittest.TestCase):
 
         mock_open.side_effect = open_side_effect
 
-        mock_list.side_effect = lambda host, dir, pattern="*.xml.gz": \
-            ["/pubmed/baseline/complex.xml.gz"] if "baseline" in dir else \
-            ["/pubmed/updatefiles/empty.xml.gz"]
+        mock_list.side_effect = (
+            lambda host, dir, pattern="*.xml.gz": ["/pubmed/baseline/complex.xml.gz"]
+            if "baseline" in dir
+            else ["/pubmed/updatefiles/empty.xml.gz"]
+        )
 
         # Run pipeline
         run_pipeline(load_target="all")
@@ -227,7 +252,8 @@ class TestFullStackIntegration(unittest.TestCase):
             FROM public.bronze_pubmed_baseline
             WHERE raw_data->'MedlineCitation'->'PMID'->0->>'#text' = '999'
         """)
-        title = cur.fetchone()[0]
+        result = cur.fetchone()
+        title = result[0] if result else ""
         # "Café ☕ Study"
         self.assertIn("Café", title)
         self.assertIn("☕", title)
@@ -238,17 +264,20 @@ class TestFullStackIntegration(unittest.TestCase):
             FROM public.bronze_pubmed_baseline
             WHERE raw_data->'MedlineCitation'->'PMID'->0->>'#text' = '999'
         """)
-        auth_type = cur.fetchone()[0]
+        result = cur.fetchone()
+        auth_type = result[0] if result else ""
         self.assertEqual(auth_type, "array", "Author should be an array even if single item")
 
         # 3. Verify Empty File Handled (No rows from empty file)
         # We expect 1 row total (from complex.xml) in baseline, 0 in updates
         cur.execute("SELECT count(*) FROM public.bronze_pubmed_updates")
-        count_updates = cur.fetchone()[0]
+        result = cur.fetchone()
+        count_updates = result[0] if result else 0
         self.assertEqual(count_updates, 0, "Empty file should yield 0 records")
 
         cur.close()
         conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()
