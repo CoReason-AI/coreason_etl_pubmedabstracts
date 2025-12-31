@@ -63,4 +63,5 @@ class TestXmlUtilsEdgeCases(unittest.TestCase):
         records = list(parse_pubmed_xml(stream))
 
         self.assertIn("ns:MedlineCitation", records[0])
-        self.assertEqual(records[0]["ns:MedlineCitation"]["ns:PMID"]["#text"], "123")
+        # ns:PMID is not in FORCE_LIST_KEYS (exact match), so it parses as string if no attributes
+        self.assertEqual(records[0]["ns:MedlineCitation"]["ns:PMID"], "123")
