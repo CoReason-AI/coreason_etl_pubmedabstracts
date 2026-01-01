@@ -8,10 +8,13 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
-import subprocess
 import os
+import subprocess
+
 import dlt
+
 from coreason_etl_pubmedabstracts.utils.logger import logger
+
 
 def run_deduplication_sweep(pipeline: dlt.Pipeline) -> None:
     """
@@ -48,12 +51,7 @@ def run_deduplication_sweep(pipeline: dlt.Pipeline) -> None:
 
     try:
         # Run dbt command
-        result = subprocess.run(
-            cmd,
-            check=True,
-            capture_output=True,
-            text=True
-        )
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         logger.info(f"dbt operation output:\n{result.stdout}")
         logger.info("Deduplication Sweep completed successfully via dbt.")
 
