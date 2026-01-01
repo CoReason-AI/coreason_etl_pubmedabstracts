@@ -73,7 +73,11 @@ def run_pipeline(load_target: str, dry_run: bool = False) -> None:
 
     # 1. Run the Pipeline
     # We pass the source function and select specific resources
-    info = pipeline.run(pubmed_source(), table_name=resources_to_run)
+    source = pubmed_source()
+    if resources_to_run:
+        source = source.with_resources(*resources_to_run)
+
+    info = pipeline.run(source)
     logger.info(f"Pipeline run completed. Load Info: {info}")
 
     # 2. Check for success (basic check)

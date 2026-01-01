@@ -8,50 +8,55 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
+import subprocess
+import os
 import dlt
-
 from coreason_etl_pubmedabstracts.utils.logger import logger
-
 
 def run_deduplication_sweep(pipeline: dlt.Pipeline) -> None:
     """
-    Perform a deduplication sweep to remove records from the Updates table
-    that are present in the Baseline table.
+    Perform a deduplication sweep by invoking the dbt macro `deduplicate_updates`.
 
     This ensures that the Baseline serves as the single source of truth for
     historical data and prevents duplication when a new Baseline is loaded.
 
     Args:
-        pipeline: The active dlt Pipeline instance connected to the destination.
+        pipeline: The active dlt Pipeline instance (used to infer config if needed,
+                  but here we rely on dbt profile).
     """
-    logger.info("Starting Deduplication Sweep: removing overlapping updates...")
+    logger.info("Starting Deduplication Sweep via dbt...")
 
-    dataset_name = pipeline.dataset_name
-    baseline_table = f"{dataset_name}.bronze_pubmed_baseline"
-    updates_table = f"{dataset_name}.bronze_pubmed_updates"
+    # We assume the dbt project is in "dbt_pubmed" directory relative to CWD
+    dbt_project_dir = "dbt_pubmed"
 
-    # Robust extraction logic for PMID
-    # Handles both string (e.g., "123") and object (e.g., {"#text": "123"}) variants
-    pmid_extract = """
-    CASE
-        WHEN jsonb_typeof(raw_data -> 'MedlineCitation' -> 'PMID' -> 0) = 'string'
-        THEN raw_data -> 'MedlineCitation' -> 'PMID' ->> 0
-        ELSE raw_data -> 'MedlineCitation' -> 'PMID' -> 0 ->> '#text'
-    END
-    """
+    if not os.path.isdir(dbt_project_dir):
+        logger.error(f"dbt project directory not found at {dbt_project_dir}")
+        raise FileNotFoundError(f"dbt project directory not found at {dbt_project_dir}")
 
-    dedup_sql = f"""
-    DELETE FROM {updates_table}
-    WHERE {pmid_extract} IN (
-        SELECT {pmid_extract}
-        FROM {baseline_table}
-    );
-    """
+    # Ensure profile matches what dlt might have set up, or rely on standard profile.
+    # We will use the 'coreason_etl_pubmedabstracts' profile as defined in dbt_project.yml
 
-    with pipeline.sql_client() as client:
-        try:
-            client.execute_sql(dedup_sql)
-            logger.info("Deduplication Sweep completed successfully.")
-        except Exception as e:
-            logger.error(f"Deduplication Sweep failed: {e}")
-            raise e
+    cmd = [
+        "dbt",
+        "run-operation",
+        "deduplicate_updates",
+        "--project-dir",
+        dbt_project_dir,
+        "--profiles-dir",
+        dbt_project_dir,  # Assuming profiles.yml is in the project dir for portability
+    ]
+
+    try:
+        # Run dbt command
+        result = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        logger.info(f"dbt operation output:\n{result.stdout}")
+        logger.info("Deduplication Sweep completed successfully via dbt.")
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Deduplication Sweep failed via dbt.\nStdout: {e.stdout}\nStderr: {e.stderr}")
+        raise e
