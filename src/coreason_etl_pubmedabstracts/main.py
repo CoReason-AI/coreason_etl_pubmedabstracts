@@ -9,6 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
 import argparse
+import subprocess
 import sys
 from typing import List, Optional
 
@@ -33,6 +34,27 @@ def get_args(args: Optional[List[str]] = None) -> argparse.Namespace:
         help="If set, initializes the pipeline but does not run ingestion.",
     )
     return parser.parse_args(args)
+
+
+def run_dbt_transformations(project_dir: str = "dbt_pubmed") -> None:
+    """
+    Execute dbt build to transform loaded data.
+    """
+    logger.info("Starting dbt transformations...")
+    try:
+        # We assume 'dbt' is in the path (installed via poetry)
+        subprocess.run(
+            ["dbt", "build", "--project-dir", project_dir],
+            check=True,
+            capture_output=False,  # Let dbt output stream to stdout/stderr
+        )
+        logger.info("dbt transformations completed successfully.")
+    except FileNotFoundError as e:
+        logger.error("dbt executable not found. Ensure dbt is installed and in the PATH.")
+        raise e
+    except subprocess.CalledProcessError as e:
+        logger.error(f"dbt transformations failed with exit code {e.returncode}")
+        raise e
 
 
 def run_pipeline(load_target: str, dry_run: bool = False) -> None:
@@ -72,13 +94,14 @@ def run_pipeline(load_target: str, dry_run: bool = False) -> None:
     logger.info(f"Running resources: {resources_to_run}")
 
     # 1. Run the Pipeline
-    # We pass the source function and select specific resources
-    info = pipeline.run(pubmed_source(), table_name=resources_to_run)
+    source = pubmed_source()
+    # Filter resources using .with_resources()
+    source = source.with_resources(*resources_to_run)
+
+    info = pipeline.run(source)
     logger.info(f"Pipeline run completed. Load Info: {info}")
 
     # 2. Check for success (basic check)
-    # dlt raises exceptions on severe errors, but we can check load_info too
-    # If using dlt < 0.4, checking logic might vary, but assuming recent dlt.
     if info.has_failed_jobs:
         logger.error("Pipeline run reported failed jobs!")
         sys.exit(1)
@@ -89,6 +112,10 @@ def run_pipeline(load_target: str, dry_run: bool = False) -> None:
         logger.info("Baseline loaded. Triggering Deduplication Sweep...")
         run_deduplication_sweep(pipeline)
         logger.info("Deduplication Sweep finished.")
+
+    # 4. Run dbt transformations
+    # This runs regardless of load target, as updates also need transformation (Silver/Gold)
+    run_dbt_transformations()
 
 
 @logger.catch  # type: ignore
