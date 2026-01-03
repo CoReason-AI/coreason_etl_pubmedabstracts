@@ -46,7 +46,7 @@ def run_deduplication_sweep(pipeline: dlt.Pipeline) -> None:
     dedup_sql = f"""
     DELETE FROM {updates_table} AS u
     USING {baseline_table} AS b
-    WHERE {get_pmid_extract('u')} = {get_pmid_extract('b')};
+    WHERE {get_pmid_extract("u")} = {get_pmid_extract("b")};
     """
 
     with pipeline.sql_client() as client:
