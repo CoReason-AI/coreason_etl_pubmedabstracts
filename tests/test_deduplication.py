@@ -31,11 +31,11 @@ class TestDeduplication(unittest.TestCase):
         sql_arg = mock_client.execute_sql.call_args[0][0]
 
         # Check expected SQL parts
-        self.assertIn("DELETE FROM pubmed_data.bronze_pubmed_updates", sql_arg)
-        # Check for the robust CASE statement logic
-        self.assertIn("CASE", sql_arg)
-        self.assertIn("jsonb_typeof", sql_arg)
-        self.assertIn("FROM pubmed_data.bronze_pubmed_baseline", sql_arg)
+        self.assertIn("DELETE FROM pubmed_data.bronze_pubmed_updates AS u", sql_arg)
+        # Check for the robust CASE statement logic (aliased)
+        self.assertIn("USING pubmed_data.bronze_pubmed_baseline AS b", sql_arg)
+        self.assertIn("u.raw_data", sql_arg)
+        self.assertIn("b.raw_data", sql_arg)
 
     def test_deduplication_failure(self) -> None:
         """Test error handling during deduplication."""
