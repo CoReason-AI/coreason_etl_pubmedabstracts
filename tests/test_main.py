@@ -200,3 +200,42 @@ class TestMainOrchestration(unittest.TestCase):
 
         with self.assertRaises(subprocess.CalledProcessError):
             run_dbt_transformations()
+
+    @patch("coreason_etl_pubmedabstracts.main.subprocess.run")
+    def test_run_dbt_transformations_not_found(self, mock_subprocess: MagicMock) -> None:
+        """Test run_dbt_transformations when dbt executable is missing."""
+        mock_subprocess.side_effect = FileNotFoundError()
+
+        with self.assertRaises(FileNotFoundError):
+            run_dbt_transformations()
+
+    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
+    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
+    def test_deduplication_failure_skips_dbt(
+        self,
+        mock_run_dbt: MagicMock,
+        mock_source_func: MagicMock,
+        mock_sweep: MagicMock,
+        mock_pipeline: MagicMock,
+    ) -> None:
+        """Test that if deduplication fails, dbt is NOT run."""
+        mock_p_instance = MagicMock()
+        mock_pipeline.return_value = mock_p_instance
+        mock_info = MagicMock()
+        mock_info.has_failed_jobs = False
+        mock_p_instance.run.return_value = mock_info
+
+        # Mock source
+        mock_source_obj = MagicMock()
+        mock_source_func.return_value = mock_source_obj
+
+        # Deduplication fails
+        mock_sweep.side_effect = Exception("Dedup failed")
+
+        with self.assertRaisesRegex(Exception, "Dedup failed"):
+            run_pipeline("all")
+
+        # Verify dbt was NOT called
+        mock_run_dbt.assert_not_called()

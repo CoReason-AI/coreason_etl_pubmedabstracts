@@ -49,6 +49,9 @@ def run_dbt_transformations(project_dir: str = "dbt_pubmed") -> None:
             capture_output=False,  # Let dbt output stream to stdout/stderr
         )
         logger.info("dbt transformations completed successfully.")
+    except FileNotFoundError as e:
+        logger.error("dbt executable not found. Ensure dbt is installed and in the PATH.")
+        raise e
     except subprocess.CalledProcessError as e:
         logger.error(f"dbt transformations failed with exit code {e.returncode}")
         raise e
