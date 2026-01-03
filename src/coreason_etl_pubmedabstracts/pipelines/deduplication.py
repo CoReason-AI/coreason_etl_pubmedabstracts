@@ -32,20 +32,21 @@ def run_deduplication_sweep(pipeline: dlt.Pipeline) -> None:
 
     # Robust extraction logic for PMID
     # Handles both string (e.g., "123") and object (e.g., {"#text": "123"}) variants
-    pmid_extract = """
-    CASE
-        WHEN jsonb_typeof(raw_data -> 'MedlineCitation' -> 'PMID' -> 0) = 'string'
-        THEN raw_data -> 'MedlineCitation' -> 'PMID' ->> 0
-        ELSE raw_data -> 'MedlineCitation' -> 'PMID' -> 0 ->> '#text'
-    END
-    """
+    # Note: We must alias the tables in the query to use them in the CASE expression correctly
+    def get_pmid_extract(table_alias: str) -> str:
+        return f"""
+        CASE
+            WHEN jsonb_typeof({table_alias}.raw_data -> 'MedlineCitation' -> 'PMID' -> 0) = 'string'
+            THEN {table_alias}.raw_data -> 'MedlineCitation' -> 'PMID' ->> 0
+            ELSE {table_alias}.raw_data -> 'MedlineCitation' -> 'PMID' -> 0 ->> '#text'
+        END
+        """
 
+    # Using DELETE ... USING for better performance on large datasets compared to IN (...)
     dedup_sql = f"""
-    DELETE FROM {updates_table}
-    WHERE {pmid_extract} IN (
-        SELECT {pmid_extract}
-        FROM {baseline_table}
-    );
+    DELETE FROM {updates_table} AS u
+    USING {baseline_table} AS b
+    WHERE {get_pmid_extract("u")} = {get_pmid_extract("b")};
     """
 
     with pipeline.sql_client() as client:
