@@ -37,6 +37,29 @@ models:
       - name: doi
         description: "The DOI of the article."
 
+  - name: gold_pubmed_authors
+    description: "Flattened view of authors with their ranks."
+    columns:
+      - name: coreason_id
+        description: "The Coreason ID of the article."
+        tests:
+          - not_null
+      - name: source_id
+        description: "The PMID."
+        tests:
+          - not_null
+      - name: author_rank
+        description: "The rank of the author in the author list (1-based)."
+        tests:
+          - not_null
+      - name: author_id
+        description: "Deterministic UUID for the author."
+        tests:
+          - not_null
+    tests:
+      - unique:
+          column_name: "source_id || '-' || author_rank::text"
+
   - name: gold_pubmed_knowledge
     description: "The final Gold layer table partitioned by year."
     columns:

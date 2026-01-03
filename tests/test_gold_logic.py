@@ -68,7 +68,7 @@ class TestGoldLogic(unittest.TestCase):
         Mimics logic in `gold_pubmed_authors.sql`.
         """
         results = []
-        for author in authors_json:
+        for i, author in enumerate(authors_json):
             last_name = author.get("LastName")
             fore_name = author.get("ForeName")
             initials = author.get("Initials")
@@ -91,6 +91,7 @@ class TestGoldLogic(unittest.TestCase):
                     "fore_name": fore_name,
                     "initials": initials,
                     "affiliation": affiliation,
+                    "author_rank": i + 1,
                 }
             )
         return results
@@ -123,18 +124,21 @@ class TestGoldLogic(unittest.TestCase):
                 "fore_name": "John",
                 "initials": "JD",
                 "affiliation": "University of Life",
+                "author_rank": 1,
             },
             {
                 "last_name": "Smith",
                 "fore_name": None,
                 "initials": None,
                 "affiliation": "Primary Lab",
+                "author_rank": 2,
             },
             {
                 "last_name": "Unknown",
                 "fore_name": None,
                 "initials": None,
                 "affiliation": None,
+                "author_rank": 3,
             },
         ]
 
@@ -446,8 +450,8 @@ class TestGoldLogic(unittest.TestCase):
         # Case 1: Empty dictionaries in list
         authors_missing_keys = [{}, {"LastName": "Doe"}]
         expected = [
-            {"last_name": None, "fore_name": None, "initials": None, "affiliation": None},
-            {"last_name": "Doe", "fore_name": None, "initials": None, "affiliation": None},
+            {"last_name": None, "fore_name": None, "initials": None, "affiliation": None, "author_rank": 1},
+            {"last_name": "Doe", "fore_name": None, "initials": None, "affiliation": None, "author_rank": 2},
         ]
         self.assertEqual(self._flatten_authors_sql_logic(authors_missing_keys), expected)
 
