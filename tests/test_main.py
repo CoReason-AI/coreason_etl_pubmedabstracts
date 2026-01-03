@@ -8,10 +8,11 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
+import subprocess
 import unittest
 from unittest.mock import MagicMock, patch
 
-from coreason_etl_pubmedabstracts.main import get_args, main, run_pipeline
+from coreason_etl_pubmedabstracts.main import get_args, main, run_dbt_transformations, run_pipeline
 
 
 class TestMainOrchestration(unittest.TestCase):
@@ -28,8 +29,15 @@ class TestMainOrchestration(unittest.TestCase):
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
     @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
-    def test_run_pipeline_all(self, mock_source: MagicMock, mock_sweep: MagicMock, mock_pipeline: MagicMock) -> None:
-        """Test running all resources triggers sweep."""
+    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
+    def test_run_pipeline_all(
+        self,
+        mock_run_dbt: MagicMock,
+        mock_source_func: MagicMock,
+        mock_sweep: MagicMock,
+        mock_pipeline: MagicMock,
+    ) -> None:
+        """Test running all resources triggers sweep and dbt."""
         # Setup mock pipeline
         mock_p_instance = MagicMock()
         mock_pipeline.return_value = mock_p_instance
@@ -38,6 +46,12 @@ class TestMainOrchestration(unittest.TestCase):
         mock_info = MagicMock()
         mock_info.has_failed_jobs = False
         mock_p_instance.run.return_value = mock_info
+
+        # Setup source mocks
+        mock_source_obj = MagicMock()
+        mock_source_func.return_value = mock_source_obj
+        mock_filtered_source = MagicMock()
+        mock_source_obj.with_resources.return_value = mock_filtered_source
 
         # Execute
         run_pipeline("all")
@@ -50,51 +64,80 @@ class TestMainOrchestration(unittest.TestCase):
             progress="log",
         )
 
-        # Verify run called with both resources
-        # dlt.run(source, table_name=...) logic
-        # table_name argument matches our resources_to_run list
-        mock_p_instance.run.assert_called_once()
-        _, kwargs = mock_p_instance.run.call_args
-        self.assertEqual(kwargs["table_name"], ["pubmed_baseline", "pubmed_updates"])
+        # Verify source.with_resources called
+        mock_source_obj.with_resources.assert_called_once_with("pubmed_baseline", "pubmed_updates")
+
+        # Verify run called with filtered source
+        mock_p_instance.run.assert_called_once_with(mock_filtered_source)
 
         # Verify sweep called
         mock_sweep.assert_called_once_with(mock_p_instance)
 
+        # Verify dbt called
+        mock_run_dbt.assert_called_once()
+
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
     @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
     def test_run_pipeline_updates_only(
-        self, mock_source: MagicMock, mock_sweep: MagicMock, mock_pipeline: MagicMock
+        self,
+        mock_run_dbt: MagicMock,
+        mock_source_func: MagicMock,
+        mock_sweep: MagicMock,
+        mock_pipeline: MagicMock,
     ) -> None:
-        """Test running only updates does NOT trigger sweep."""
+        """Test running only updates does NOT trigger sweep but runs dbt."""
         mock_p_instance = MagicMock()
         mock_pipeline.return_value = mock_p_instance
         mock_info = MagicMock()
         mock_info.has_failed_jobs = False
         mock_p_instance.run.return_value = mock_info
 
+        mock_source_obj = MagicMock()
+        mock_source_func.return_value = mock_source_obj
+        mock_filtered_source = MagicMock()
+        mock_source_obj.with_resources.return_value = mock_filtered_source
+
         run_pipeline("updates")
 
+        # Verify source.with_resources called
+        mock_source_obj.with_resources.assert_called_once_with("pubmed_updates")
+
         # Verify run called with updates only
-        _, kwargs = mock_p_instance.run.call_args
-        self.assertEqual(kwargs["table_name"], ["pubmed_updates"])
+        mock_p_instance.run.assert_called_once_with(mock_filtered_source)
 
         # Verify sweep NOT called
         mock_sweep.assert_not_called()
 
+        # Verify dbt called
+        mock_run_dbt.assert_called_once()
+
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
     @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
-    def test_dry_run(self, mock_sweep: MagicMock, mock_pipeline: MagicMock) -> None:
+    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
+    def test_dry_run(self, mock_dbt: MagicMock, mock_sweep: MagicMock, mock_pipeline: MagicMock) -> None:
         """Test dry run skips execution."""
         run_pipeline("all", dry_run=True)
 
         mock_pipeline.assert_called_once()
         mock_pipeline.return_value.run.assert_not_called()
         mock_sweep.assert_not_called()
+        mock_dbt.assert_not_called()
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
     @patch("coreason_etl_pubmedabstracts.main.sys.exit")
-    def test_failed_jobs_exit(self, mock_exit: MagicMock, mock_pipeline: MagicMock) -> None:
+    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
+    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
+    def test_failed_jobs_exit(
+        self,
+        mock_sweep: MagicMock,
+        mock_dbt: MagicMock,
+        mock_source: MagicMock,
+        mock_exit: MagicMock,
+        mock_pipeline: MagicMock,
+    ) -> None:
         """Test that failed jobs trigger sys.exit(1)."""
         mock_p_instance = MagicMock()
         mock_pipeline.return_value = mock_p_instance
@@ -140,3 +183,59 @@ class TestMainOrchestration(unittest.TestCase):
         main()
 
         mock_exit.assert_called_once_with(1)
+
+    @patch("coreason_etl_pubmedabstracts.main.subprocess.run")
+    def test_run_dbt_transformations_success(self, mock_subprocess: MagicMock) -> None:
+        """Test run_dbt_transformations success."""
+        run_dbt_transformations()
+
+        mock_subprocess.assert_called_once_with(
+            ["dbt", "build", "--project-dir", "dbt_pubmed"], check=True, capture_output=False
+        )
+
+    @patch("coreason_etl_pubmedabstracts.main.subprocess.run")
+    def test_run_dbt_transformations_failure(self, mock_subprocess: MagicMock) -> None:
+        """Test run_dbt_transformations failure."""
+        mock_subprocess.side_effect = subprocess.CalledProcessError(1, ["dbt"])
+
+        with self.assertRaises(subprocess.CalledProcessError):
+            run_dbt_transformations()
+
+    @patch("coreason_etl_pubmedabstracts.main.subprocess.run")
+    def test_run_dbt_transformations_not_found(self, mock_subprocess: MagicMock) -> None:
+        """Test run_dbt_transformations when dbt executable is missing."""
+        mock_subprocess.side_effect = FileNotFoundError()
+
+        with self.assertRaises(FileNotFoundError):
+            run_dbt_transformations()
+
+    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
+    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
+    def test_deduplication_failure_skips_dbt(
+        self,
+        mock_run_dbt: MagicMock,
+        mock_source_func: MagicMock,
+        mock_sweep: MagicMock,
+        mock_pipeline: MagicMock,
+    ) -> None:
+        """Test that if deduplication fails, dbt is NOT run."""
+        mock_p_instance = MagicMock()
+        mock_pipeline.return_value = mock_p_instance
+        mock_info = MagicMock()
+        mock_info.has_failed_jobs = False
+        mock_p_instance.run.return_value = mock_info
+
+        # Mock source
+        mock_source_obj = MagicMock()
+        mock_source_func.return_value = mock_source_obj
+
+        # Deduplication fails
+        mock_sweep.side_effect = Exception("Dedup failed")
+
+        with self.assertRaisesRegex(Exception, "Dedup failed"):
+            run_pipeline("all")
+
+        # Verify dbt was NOT called
+        mock_run_dbt.assert_not_called()
