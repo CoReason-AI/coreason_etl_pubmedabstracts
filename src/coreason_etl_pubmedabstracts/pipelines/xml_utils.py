@@ -14,13 +14,12 @@ import xmltodict
 from lxml import etree
 
 # Keys that should always be parsed as a list, even if only one element exists.
-# This ensures consistent JSON structure for downstream processing.
 FORCE_LIST_KEYS = (
     "Author",
     "ArticleId",
     "Chemical",
     "DataBank",
-    "DeleteCitation",  # Though usually wrapper, children PMIDs should be list? No, PMID is the child.
+    "DeleteCitation",
     "ELocationID",
     "GeneSymbol",
     "Grant",
@@ -33,13 +32,39 @@ FORCE_LIST_KEYS = (
     "OtherAbstract",
     "OtherID",
     "PersonalNameSubject",
-    "PMID",  # In DeleteCitation, multiple PMIDs can exist. In MedlineCitation, usually one, but being safe.
+    "PMID",
     "PublicationType",
     "Reference",
     "SpaceFlightMission",
     "GeneralNote",
     "SupplMeshName",
 )
+
+
+def _strip_namespaces(elem: etree._Element) -> None:
+    """
+    Remove namespaces from the element and its children in-place.
+    Also removes xmlns attributes.
+    """
+    # Iterate over all elements in the subtree
+    for node in elem.iter():
+        # Check if the tag has a namespace (indicated by '}')
+        if isinstance(node.tag, str) and "}" in node.tag:
+            # Replace tag with its local name
+            node.tag = etree.QName(node).localname
+
+    # Remove unused namespace declarations
+    etree.cleanup_namespaces(elem)
+
+
+def _flatten_mixed_content(elem: etree._Element, tags: tuple[str, ...]) -> None:
+    """
+    Flatten mixed content (remove child tags but keep text) for specified tags.
+    """
+    for tag in tags:
+        # Use local-name() to find tags regardless of namespace (though we strip them later)
+        for node in elem.xpath(f".//*[local-name()='{tag}']"):
+            etree.strip_tags(node, "*")
 
 
 def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
@@ -61,50 +86,34 @@ def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
                 return
             file_stream.seek(pos)
     except Exception:
-        # Stream might not be seekable, fall back to try-except on iterparse
+        # Stream might not be seekable, continue
         pass
 
     try:
         # iterparse events: 'end' is sufficient for complete elements.
-        # We do not filter by tag in iterparse arguments to handle namespaces robustly.
-        # Note: 'end' event does NOT yield comments/PIs, so elem.tag is always a string (tag name).
         context = etree.iterparse(file_stream, events=("end",))
 
         for _event, elem in context:
-            # Strip namespace to check the tag name
-            # lxml tags are like "{http://namespace}TagName" or just "TagName"
+            # Check tag name robustly (ignoring namespace prefix)
             tag_name = etree.QName(elem).localname
 
             if tag_name in ("MedlineCitation", "DeleteCitation"):
-                # Flatten mixed content in specific text-heavy fields
-                # This prevents xmltodict from splitting text due to internal tags like <i>, <b>, <sup>.
-                # We strip child tags but preserve their text content.
-                # Use local-name() to handle namespaces robustly (e.g. ns:ArticleTitle vs ArticleTitle)
-                for tag in ("ArticleTitle", "AbstractText", "VernacularTitle", "Affiliation"):
-                    for node in elem.xpath(f".//*[local-name()='{tag}']"):
-                        # Strip all child tags (preserving text)
-                        etree.strip_tags(node, "*")
+                # 1. Flatten mixed content for text-heavy fields
+                _flatten_mixed_content(
+                    elem,
+                    ("ArticleTitle", "AbstractText", "VernacularTitle", "Affiliation"),
+                )
 
-                # Strip Namespaces: iterate over all elements and remove namespace from tag
-                # This ensures xmltodict produces clean keys (e.g., "PMID" instead of "ns1:PMID")
-                for node in elem.iter():
-                    if isinstance(node.tag, str) and "}" in node.tag:
-                        node.tag = etree.QName(node).localname
-                    # Also strip attributes if needed? (Usually attributes don't have NS in this schema)
-                    # But if they do, we might want to clean them too.
-                    # For now, tag stripping is critical for JSON structure.
+                # 2. Strip Namespaces
+                _strip_namespaces(elem)
 
-                # Remove xmlns attributes from root to prevent xmltodict from thinking they are attrs
-                etree.cleanup_namespaces(elem)
-
-                # Convert the lxml element to a string
+                # 3. Convert to String
                 xml_str = etree.tostring(elem, encoding="unicode")
 
-                # Parse with xmltodict, forcing specific keys to be lists
-                # process_namespaces=False is default, which is fine since we stripped them manually.
+                # 4. Parse to Dict
                 doc = xmltodict.parse(xml_str, force_list=FORCE_LIST_KEYS)
 
-                # Inject _record_type based on the known tag name
+                # 5. Inject Record Type
                 if tag_name == "MedlineCitation":
                     doc["_record_type"] = "citation"
                 elif tag_name == "DeleteCitation":
@@ -112,15 +121,12 @@ def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
 
                 yield doc
 
-                # Important: Clear the element to save memory
+                # 6. Memory Management
                 elem.clear()
-                # Also clear the references to previous siblings from the root
                 while elem.getprevious() is not None:
                     del elem.getparent()[0]
 
     except etree.XMLSyntaxError as e:
-        # Handle empty files that might not have been caught by seek check
-        # "no element found" is raised for empty documents or documents with only comments
         if "no element found" in str(e):
             return
         raise
