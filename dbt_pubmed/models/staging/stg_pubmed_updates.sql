@@ -41,6 +41,11 @@ upserts as (
             substring(raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'MedlineDate' from '\d{4}')
         ) as pub_year,
 
+        -- Date Components
+        raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'Month' as pub_month,
+        raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'Day' as pub_day,
+        raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'MedlineDate' as medline_date,
+
         -- Authors
         raw_data -> 'MedlineCitation' -> 'Article' -> 'AuthorList' -> 'Author' as authors,
 
@@ -79,6 +84,9 @@ deletes as (
         null::text as title,
         null::text as abstract_text,
         null::text as pub_year,
+        null::text as pub_month,
+        null::text as pub_day,
+        null::text as medline_date,
         null::jsonb as authors,
         null::jsonb as mesh_terms,
         null::jsonb as languages,

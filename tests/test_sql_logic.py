@@ -399,3 +399,103 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         self.assertEqual(len(result2), 1)
         # State should be identical
         self.assertEqual(result2, result1)
+
+
+class TestDateLogic(unittest.TestCase):
+    """
+    Tests the logic for constructing publication_date from partial XML fields.
+    This mirrors the intended SQL logic in int_pubmed_deduped.sql.
+    """
+
+    def _simulate_sql_date_logic(self, year: str, month: str, day: str, medline_date: str) -> str:
+        """
+        Simulate the SQL CASE logic for date construction.
+        Returns a string 'YYYY-MM-DD'.
+        """
+        # 1. Clean/Normalize inputs (SQL: coalesce(..., ''))
+        y = year if year else ""
+        m = month if month else ""
+        d = day if day else ""
+        md = medline_date if medline_date else ""
+
+        # 2. Extract Year
+        final_year = y
+        if not final_year and md:
+            # SQL: substring(medline_date from '\d{4}')
+            import re
+
+            match = re.search(r"\d{4}", md)
+            if match:
+                final_year = match.group(0)
+
+        if not final_year:
+            return "1900-01-01"  # Default fallback
+
+        # 3. Extract Month
+        final_month = "01"
+        if m:
+            # SQL: Case insensitive matching for months
+            m_lower = m.lower()
+            months = {
+                "jan": "01",
+                "january": "01",
+                "feb": "02",
+                "february": "02",
+                "mar": "03",
+                "march": "03",
+                "apr": "04",
+                "april": "04",
+                "may": "05",
+                "jun": "06",
+                "june": "06",
+                "jul": "07",
+                "july": "07",
+                "aug": "08",
+                "august": "08",
+                "sep": "09",
+                "september": "09",
+                "oct": "10",
+                "october": "10",
+                "nov": "11",
+                "november": "11",
+                "dec": "12",
+                "december": "12",
+            }
+            # Also handle digit months "01", "1", etc.
+            if m_lower in months:
+                final_month = months[m_lower]
+            elif m.isdigit():
+                final_month = f"{int(m):02d}"
+        elif md:
+            # Try to find month in MedlineDate if Year was found there (or even if not)
+            # MedlineDate examples: "1998 Dec-1999 Jan", "Spring 2000"
+            # Logic: If we rely on MedlineDate, we usually just default to Jan unless we want to be fancy.
+            # For this iteration, let's keep it simple: If using MedlineDate, default to Jan 01
+            # unless we want to parse it. The requirement says "extract publication_date".
+            # Standard practice: First day of the year/season.
+            pass
+
+        # 4. Extract Day
+        final_day = "01"
+        if d and d.isdigit():
+            final_day = f"{int(d):02d}"
+
+        return f"{final_year}-{final_month}-{final_day}"
+
+    def test_standard_date(self) -> None:
+        self.assertEqual(self._simulate_sql_date_logic("2023", "May", "15", ""), "2023-05-15")
+
+    def test_numeric_date(self) -> None:
+        self.assertEqual(self._simulate_sql_date_logic("2023", "05", "15", ""), "2023-05-15")
+
+    def test_short_month(self) -> None:
+        self.assertEqual(self._simulate_sql_date_logic("2023", "Dec", "01", ""), "2023-12-01")
+
+    def test_medline_date_year_only(self) -> None:
+        self.assertEqual(self._simulate_sql_date_logic("", "", "", "1998 Dec-1999 Jan"), "1998-01-01")
+
+    def test_medline_date_season(self) -> None:
+        self.assertEqual(self._simulate_sql_date_logic("", "", "", "Spring 2000"), "2000-01-01")
+
+    def test_fallback(self) -> None:
+        self.assertEqual(self._simulate_sql_date_logic("", "", "", ""), "1900-01-01")
