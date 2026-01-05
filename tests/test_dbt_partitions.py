@@ -1,5 +1,5 @@
 import re
-from typing import Callable, Optional, Any
+from typing import Any, Callable, Optional
 from unittest.mock import MagicMock
 
 import jinja2
