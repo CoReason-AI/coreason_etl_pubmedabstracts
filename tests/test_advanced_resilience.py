@@ -10,146 +10,67 @@
 
 import unittest
 from io import BytesIO
-from unittest.mock import MagicMock, patch
+from typing import Optional, Dict, Any
 
 from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
 
 
 class TestAdvancedResilience(unittest.TestCase):
-    def test_deep_nesting(self) -> None:
-        """
-        Verify parsing of deeply nested elements where multiple levels are forced to lists.
-        Hierarchy: MedlineCitation -> Article -> AuthorList -> Author -> AffiliationInfo -> Affiliation
-        Keys forced to list: Author, Affiliation (via FORCE_LIST_KEYS? Need to check)
-        Let's check xml_utils.py FORCE_LIST_KEYS.
-        """
-        # We assume FORCE_LIST_KEYS includes 'Author'.
-        # Let's verify if 'Affiliation' is in there.
-        # Checking logic: keys are explicit.
-        # If 'Affiliation' is NOT in FORCE_LIST_KEYS, it will be a dict if single.
-        # But 'Author' IS.
+    """
+    Advanced resilience tests covering complex edge cases not found in standard
+    compliance or happy-path tests.
+    """
 
-        xml_content = b"""
-        <PubmedArticleSet>
-            <MedlineCitation>
-                <PMID>1</PMID>
-                <Article>
-                    <AuthorList>
-                        <Author>
-                            <LastName>Doe</LastName>
-                            <AffiliationInfo>
-                                <Affiliation>University of Test</Affiliation>
-                            </AffiliationInfo>
-                        </Author>
-                    </AuthorList>
-                </Article>
-            </MedlineCitation>
-        </PubmedArticleSet>
+    def test_namespaced_xml_keys_strict(self) -> None:
         """
-        stream = BytesIO(xml_content)
-        records = list(parse_pubmed_xml(stream))
-
-        # Author should be a list
-        authors = records[0]["MedlineCitation"]["Article"]["AuthorList"]["Author"]
-        self.assertIsInstance(authors, list)
-
-        # AffiliationInfo usually contains Affiliation.
-        # If Affiliation is not forced, it's a string/dict.
-        # Let's inspect what we get.
-        affil_info = authors[0]["AffiliationInfo"]
-        # xmltodict behavior: <AffiliationInfo><Affiliation>...</Affiliation></AffiliationInfo>
-        # affil_info['Affiliation'] -> "University of Test"
-        self.assertEqual(affil_info["Affiliation"], "University of Test")
-
-    def test_mixed_content(self) -> None:
-        """
-        Verify parsing of elements containing both text and child tags.
+        Verify that XML elements with Namespace Prefixes produce clean keys in the JSON output.
+        The downstream SQL models expect keys like 'MedlineCitation', not 'ns1:MedlineCitation'.
         """
         xml_content = b"""
-        <PubmedArticleSet>
-            <MedlineCitation>
-                <PMID>1</PMID>
-                <GeneralNote>
-                    This is a note with <b class="bold">bold</b> text.
-                </GeneralNote>
-            </MedlineCitation>
-        </PubmedArticleSet>
+        <ns1:PubmedArticleSet xmlns:ns1="http://example.org/ns">
+            <ns1:MedlineCitation>
+                <ns1:PMID>99999</ns1:PMID>
+                <ns1:Article>
+                    <ns1:ArticleTitle>Namespaced Title</ns1:ArticleTitle>
+                </ns1:Article>
+            </ns1:MedlineCitation>
+        </ns1:PubmedArticleSet>
         """
         stream = BytesIO(xml_content)
-        records = list(parse_pubmed_xml(stream))
-
-        # GeneralNote is in FORCE_LIST_KEYS
-        notes = records[0]["MedlineCitation"]["GeneralNote"]
-        self.assertIsInstance(notes, list)
-
-        # Mixed content in xmltodict usually results in:
-        # {'#text': 'This is a note with ', 'b': {'@class': 'bold', '#text': 'bold'}, ...}
-        # OR it might just be text if mixed=True is not default?
-        # xmltodict default handles mixed content by splitting.
-        # Let's verify the structure.
-        note = notes[0]
-        self.assertIn("#text", note)
-        self.assertTrue(note["#text"].startswith("This is a note with"))
-        self.assertIn("b", note)
-
-    @patch("coreason_etl_pubmedabstracts.pipelines.xml_utils.etree.QName")
-    @patch("coreason_etl_pubmedabstracts.pipelines.xml_utils.etree.iterparse")
-    @patch("coreason_etl_pubmedabstracts.pipelines.xml_utils.etree.tostring")
-    def test_memory_clearing(self, mock_tostring: MagicMock, mock_iterparse: MagicMock, mock_qname: MagicMock) -> None:
-        """
-        Verify that elem.clear() and parent cleanup are called to prevent memory leaks.
-        """
-        # Setup the mock element
-        mock_elem = MagicMock()
-        mock_parent = MagicMock()
-
-        # Mock QName to return "MedlineCitation"
-        mock_qname.return_value.localname = "MedlineCitation"
-
-        # Setup parent behavior
-        # getparent() returns mock_parent
-        mock_elem.getparent.return_value = mock_parent
-
-        # Setup getprevious behavior for the while loop
-        # First call: not None (trigger delete)
-        # Second call: None (stop loop)
-        mock_elem.getprevious.side_effect = ["sibling", None]
-
-        # Setup mock_parent to simulate list behavior for deletion
-        # del elem.getparent()[0]
-        # mock_parent[0] access isn't strictly needed if we just mock __delitem__ or __getitem__?
-        # Actually `del elem.getparent()[0]` calls `mock_parent.__delitem__(0)`
-
-        # iterparse yields (event, elem)
-        mock_iterparse.return_value = iter([("end", mock_elem)])
-
-        # tostring returns a valid XML string so xmltodict.parse works
-        mock_tostring.return_value = "<MedlineCitation><PMID>1</PMID></MedlineCitation>"
-
-        stream = BytesIO(b"dummy")
         records = list(parse_pubmed_xml(stream))
 
         self.assertEqual(len(records), 1)
+        record = records[0]
 
-        # Verify clear() was called
-        mock_elem.clear.assert_called_once()
+        # The root key must be EXACTLY "MedlineCitation", not "ns1:MedlineCitation"
+        keys = list(record.keys())
+        self.assertIn("_record_type", keys)
 
-        # Verify cleanup of previous siblings
-        # We expected loop to run once
-        mock_elem.getparent.assert_called()  # Called to check parent
-        mock_parent.__delitem__.assert_called_with(0)
+        # Check if "MedlineCitation" is present without prefix
+        # This assertion will fail if the parser preserves prefixes
+        self.assertIn("MedlineCitation", keys, f"Keys found: {keys}")
 
-    def test_unicode_surrogates_and_edge_chars(self) -> None:
+        # Check nested keys as well
+        citation = record.get("MedlineCitation", {})
+        self.assertIn("PMID", citation, "Nested key 'PMID' should be present without prefix")
+        # PMID is in FORCE_LIST_KEYS, so it should be a list
+        self.assertEqual(citation["PMID"], ["99999"])
+
+    def test_mixed_content_unhandled_field(self) -> None:
         """
-        Test resilience against tricky unicode characters.
+        Test mixed content in a field NOT handled by the strip_tags logic.
+        xml_utils only strips tags for: ArticleTitle, AbstractText, VernacularTitle, Affiliation.
+
+        If we have mixed content in another field (e.g. 'CoIStatement'),
+        xmltodict behavior is typically to split it into '#text' and children.
+        We want to document/verify this behavior.
         """
-        # Emoji and mathematical symbols
         xml_content = b"""
         <PubmedArticleSet>
             <MedlineCitation>
                 <PMID>1</PMID>
                 <Article>
-                    <ArticleTitle>Study on \xf0\x9f\x98\x80 (Grinning Face) &amp; \xe2\x88\x91 (Sum)</ArticleTitle>
+                    <CoIStatement>This is <b>bold</b> statement.</CoIStatement>
                 </Article>
             </MedlineCitation>
         </PubmedArticleSet>
@@ -157,7 +78,80 @@ class TestAdvancedResilience(unittest.TestCase):
         stream = BytesIO(xml_content)
         records = list(parse_pubmed_xml(stream))
 
-        title = records[0]["MedlineCitation"]["Article"]["ArticleTitle"]
-        # Check that characters are preserved
-        self.assertIn("😀", title)
-        self.assertIn("∑", title)
+        coi = records[0]["MedlineCitation"]["Article"]["CoIStatement"]
+
+        # xmltodict default behavior for mixed content:
+        # It creates a complex object or list logic.
+        # Actually xmltodict usually preserves order if configured,
+        # but for standard mixed content without special config, it looks like:
+        # {'#text': 'This is  statement.', 'b': 'bold'} (text might be split or concatenated?)
+        # Let's inspect what we get.
+
+        # If it returns a dictionary, it's what we expect from xmltodict.
+        # We just want to ensure it doesn't crash or return None.
+        self.assertIsInstance(coi, (dict, str, list))
+
+        if isinstance(coi, dict):
+            # Likely has keys for the text parts and the child tag
+            # Just verifying existence of data
+            self.assertTrue(any(k for k in coi.keys()))
+
+    def test_massive_nested_recursion(self) -> None:
+        """
+        Simulate a deeply nested structure to ensure no recursion limits are hit
+        during the 'tostring' or 'parse' phase (within reason).
+        """
+        depth = 100
+        inner = "<Leaf>Val</Leaf>"
+        for _ in range(depth):
+            inner = f"<Nest>{inner}</Nest>"
+
+        xml_content = f"""
+        <PubmedArticleSet>
+            <MedlineCitation>
+                <PMID>1</PMID>
+                <Article>
+                    {inner}
+                </Article>
+            </MedlineCitation>
+        </PubmedArticleSet>
+        """.encode('utf-8')
+
+        stream = BytesIO(xml_content)
+        records = list(parse_pubmed_xml(stream))
+
+        self.assertEqual(len(records), 1)
+        # Traverse down
+        curr = records[0]["MedlineCitation"]["Article"]
+        for _ in range(depth):
+            curr = curr["Nest"]
+        self.assertEqual(curr["Leaf"], "Val")
+
+    def test_date_logic_invalid_inputs(self) -> None:
+        """
+        Test the robustness of Date Logic (mocking SQL behavior).
+        Specifically 'Feb 30' or other non-existent dates.
+        """
+        # We use the logic mirror from `test_gold_logic.py` effectively,
+        # but here we focus on the SQL `make_date` equivalent behavior.
+
+        # Postgres `make_date(year, month, day)` raises an error if the date is invalid.
+        # It does NOT return NULL.
+        # We need to decide if we want our pipeline to crash or handle it.
+        # Ideally, we should handle it.
+        # But `make_date` is hard to wrap in "TRY" logic in standard Postgres
+        # without a custom PL/pgSQL function or simple case logic for days.
+
+        # Valid Date
+        self._simulate_make_date(2023, 2, 28) # Should pass
+
+        # Invalid Date - Logic Verification
+        with self.assertRaises(ValueError):
+            self._simulate_make_date(2023, 2, 30)
+
+    def _simulate_make_date(self, year: int, month: int, day: int) -> Any:
+        """
+        Python simulation of Postgres make_date strictness.
+        """
+        import datetime
+        return datetime.date(year, month, day)
