@@ -33,8 +33,11 @@
   -- 3. Create Yearly Partitions (1900 to 2030)
   -- Loop to create explicit partitions for better performance and organization
   {% for year in range(1900, 2031) %}
+  {%- set partition_suffix = "_" ~ year -%}
+  {%- set partition_nm = target_relation.identifier ~ partition_suffix -%}
+  {%- set partition_relation = target_relation.incorporate(path={"identifier": partition_nm}) -%}
   {% call statement('create_partition_' ~ year) -%}
-    CREATE TABLE IF NOT EXISTS {{ target_relation }}_{{ year }}
+    CREATE TABLE IF NOT EXISTS {{ partition_relation }}
     PARTITION OF {{ target_relation }}
     FOR VALUES FROM ({{ year }}) TO ({{ year + 1 }});
   {%- endcall %}
@@ -42,8 +45,10 @@
 
   -- 4. Create a Default Partition
   -- Catches any data outside the explicit ranges (e.g. nulls or future dates)
+  {%- set default_nm = target_relation.identifier ~ "_default" -%}
+  {%- set default_relation = target_relation.incorporate(path={"identifier": default_nm}) -%}
   {% call statement('create_default_partition') -%}
-    CREATE TABLE IF NOT EXISTS {{ target_relation }}_default
+    CREATE TABLE IF NOT EXISTS {{ default_relation }}
     PARTITION OF {{ target_relation }} DEFAULT;
   {%- endcall %}
 
