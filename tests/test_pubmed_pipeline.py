@@ -34,12 +34,42 @@ class TestPubmedPipeline(unittest.TestCase):
 
         resource = pubmed_baseline()
         self.assertEqual(resource.table_name, "bronze_pubmed_baseline")
-        self.assertEqual(resource.write_disposition, "replace")
+        # Changed to 'append' to support resumability
+        self.assertEqual(resource.write_disposition, "append")
 
         records = list(resource)
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["file_name"], "pubmed24n0001.xml.gz")
         self.assertEqual(records[0]["raw_data"]["MedlineCitation"]["PMID"], "1")
+
+    @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.list_remote_files")
+    @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.open_remote_file")
+    @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.parse_pubmed_xml")
+    def test_pubmed_baseline_incremental_logic(
+        self, mock_parse: MagicMock, mock_open: MagicMock, mock_list: MagicMock
+    ) -> None:
+        """Test that pubmed_baseline skips files that are already processed."""
+        # Files available on server
+        mock_list.return_value = [
+            "/pubmed/baseline/pubmed24n0001.xml.gz",  # Old
+            "/pubmed/baseline/pubmed24n0002.xml.gz",  # New
+        ]
+        mock_open.return_value.__enter__.return_value = MagicMock()
+        mock_parse.return_value = iter([{"MedlineCitation": {"PMID": "X"}}])
+
+        # Invoke resource with the cursor value as a string
+        # dlt wraps this internally into the Incremental object
+        resource = pubmed_baseline(last_file="pubmed24n0001.xml.gz")
+        records = list(resource)
+
+        # Assertion:
+        # Should invoke open_remote_file ONLY for 0002, skipping 0001.
+        self.assertEqual(mock_open.call_count, 1)
+        mock_open.assert_called_with("ftp.ncbi.nlm.nih.gov", "/pubmed/baseline/pubmed24n0002.xml.gz")
+
+        # Should yield records from 0002
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["file_name"], "pubmed24n0002.xml.gz")
 
     @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.list_remote_files")
     @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.open_remote_file")
