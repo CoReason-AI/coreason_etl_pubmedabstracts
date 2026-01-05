@@ -9,21 +9,18 @@
   {%- endif -%}
 
   {{ run_hooks(pre_hooks, inside_transaction=False) }}
-
-  -- `BEGIN` happens here:
   {{ run_hooks(pre_hooks, inside_transaction=True) }}
 
-  --------------------------------------------------------------------------------------------------------------------
-  -- 1. Create a temporary table with the data
-  --------------------------------------------------------------------------------------------------------------------
+  -- 1. Create a temporary table with the data (CTAS)
+  -- Standard dbt materialization pattern
   {% call statement('main') -%}
     {{ create_table_as(True, tmp_relation, sql) }}
   {%- endcall %}
 
-  --------------------------------------------------------------------------------------------------------------------
   -- 2. Create the Partitioned Table Structure
-  --------------------------------------------------------------------------------------------------------------------
-  -- Drop the existing target relation if it exists
+  -- If exists, drop and recreate. (Full Refresh strategy for now, or use atomic swap if needed)
+  -- To support atomic swap, we would need to create a new target, partition it, fill it, then rename.
+  -- For simplicity in this atomic unit, we drop-create.
   {%- if existing_relation is not none -%}
       {{ adapter.drop_relation(existing_relation) }}
   {%- endif -%}
@@ -33,38 +30,26 @@
     PARTITION BY RANGE ({{ partition_by }});
   {%- endcall %}
 
-  --------------------------------------------------------------------------------------------------------------------
   -- 3. Create a Default Partition
-  -- Essential because Postgres will fail the INSERT if rows don't map to a partition.
-  --------------------------------------------------------------------------------------------------------------------
   {% call statement('create_default_partition') -%}
     CREATE TABLE {{ target_relation }}_default
     PARTITION OF {{ target_relation }} DEFAULT;
   {%- endcall %}
 
-  --------------------------------------------------------------------------------------------------------------------
   -- 4. Insert data from Temp to Target
-  --------------------------------------------------------------------------------------------------------------------
   {% call statement('insert_data') -%}
     INSERT INTO {{ target_relation }} SELECT * FROM {{ tmp_relation }};
   {%- endcall %}
 
-  --------------------------------------------------------------------------------------------------------------------
   -- 5. Create Indexes
-  -- Explicitly creating indexes defined in model config
-  --------------------------------------------------------------------------------------------------------------------
+  -- Note: Indexes on partitioned tables are automatically propagated to partitions in modern Postgres (11+)
   {{ create_indexes(target_relation) }}
 
-  --------------------------------------------------------------------------------------------------------------------
   -- 6. Cleanup
-  --------------------------------------------------------------------------------------------------------------------
   {{ adapter.drop_relation(tmp_relation) }}
 
   {{ run_hooks(post_hooks, inside_transaction=True) }}
-
-  -- `COMMIT` happens here
   {{ adapter.commit() }}
-
   {{ run_hooks(post_hooks, inside_transaction=False) }}
 
   {{ return({'relations': [target_relation]}) }}
