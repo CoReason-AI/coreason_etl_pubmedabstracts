@@ -45,6 +45,11 @@ parsed as (
             substring(raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'MedlineDate' from '\d{4}')
         ) as pub_year,
 
+        -- Date Components for Silver Layer construction
+        raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'Month' as pub_month,
+        raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'Day' as pub_day,
+        raw_data -> 'MedlineCitation' -> 'Article' -> 'Journal' -> 'JournalIssue' -> 'PubDate' ->> 'MedlineDate' as medline_date,
+
         -- Authors (Already normalized to list in Python)
         -- Path: Article -> AuthorList -> Author
         raw_data -> 'MedlineCitation' -> 'Article' -> 'AuthorList' -> 'Author' as authors,

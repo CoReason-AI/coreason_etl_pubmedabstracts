@@ -73,6 +73,42 @@ final as (
         doi,
         abstract_text,
         pub_year,
+
+        -- Construct Publication Date
+        make_date(
+            -- Year: Use extracted pub_year or regex from medline_date, fallback to 1900
+            coalesce(
+                nullif(pub_year, '')::int,
+                (substring(medline_date from '\d{4}'))::int,
+                1900
+            ),
+            -- Month: Map text to int, fallback to 1
+            case
+                -- Handle numeric months first
+                when pub_month ~ '^\d+$' then (pub_month)::int
+                -- Handle short text
+                when lower(pub_month) in ('jan', 'january', '01') then 1
+                when lower(pub_month) in ('feb', 'february', '02') then 2
+                when lower(pub_month) in ('mar', 'march', '03') then 3
+                when lower(pub_month) in ('apr', 'april', '04') then 4
+                when lower(pub_month) in ('may', '05') then 5
+                when lower(pub_month) in ('jun', 'june', '06') then 6
+                when lower(pub_month) in ('jul', 'july', '07') then 7
+                when lower(pub_month) in ('aug', 'august', '08') then 8
+                when lower(pub_month) in ('sep', 'september', '09') then 9
+                when lower(pub_month) in ('oct', 'october', '10') then 10
+                when lower(pub_month) in ('nov', 'november', '11') then 11
+                when lower(pub_month) in ('dec', 'december', '12') then 12
+                -- Default
+                else 1
+            end,
+            -- Day: Use extracted day or fallback to 1
+            case
+                when pub_day ~ '^\d+$' then (pub_day)::int
+                else 1
+            end
+        ) as publication_date,
+
         authors,
         mesh_terms,
         languages,
