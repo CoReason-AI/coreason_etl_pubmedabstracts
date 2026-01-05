@@ -67,6 +67,7 @@ def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
     try:
         # iterparse events: 'end' is sufficient for complete elements.
         # We do not filter by tag in iterparse arguments to handle namespaces robustly.
+        # Note: 'end' event does NOT yield comments/PIs, so elem.tag is always a string (tag name).
         context = etree.iterparse(file_stream, events=("end",))
 
         for _event, elem in context:
@@ -87,7 +88,7 @@ def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
                 # Strip Namespaces: iterate over all elements and remove namespace from tag
                 # This ensures xmltodict produces clean keys (e.g., "PMID" instead of "ns1:PMID")
                 for node in elem.iter():
-                    if "}" in node.tag:
+                    if isinstance(node.tag, str) and "}" in node.tag:
                         node.tag = etree.QName(node).localname
                     # Also strip attributes if needed? (Usually attributes don't have NS in this schema)
                     # But if they do, we might want to clean them too.

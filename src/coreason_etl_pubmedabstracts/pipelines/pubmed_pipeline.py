@@ -52,19 +52,37 @@ def _wrap_record(record: Dict[str, Any], file_name: str) -> Dict[str, Any]:
     }
 
 
-@dlt.resource(write_disposition="replace", table_name="bronze_pubmed_baseline")  # type: ignore[misc]
-def pubmed_baseline(host: str = "ftp.ncbi.nlm.nih.gov") -> Iterator[Dict[str, Any]]:
+@dlt.resource(write_disposition="append", table_name="bronze_pubmed_baseline")  # type: ignore[misc]
+def pubmed_baseline(
+    host: str = "ftp.ncbi.nlm.nih.gov",
+    last_file: Optional[dlt.sources.incremental[str]] = dlt.sources.incremental("file_name"),  # noqa: B008
+) -> Iterator[Dict[str, Any]]:
     """
     Resource for PubMed Baseline.
     Iterates over all baseline files, parses them, and yields records.
+    Uses incremental loading to allow resuming from the last processed file.
+
+    Note: The write_disposition is 'append' to support resuming.
+    A full reload requires dropping the table or resetting the state manually.
     """
     # 1. List files
     files = list_remote_files(host, "/pubmed/baseline/")
 
+    # Explicitly sort to ensure safety even if list_remote_files (or FTP) returns unsorted
+    files = sorted(files)
+
+    # Filter files based on incremental state
+    start_value = last_file.last_value if last_file else None
+
     # 2. Iterate and process
     for file_path in files:
-        logger.info(f"Processing Baseline file: {file_path}")
         file_name = file_path.split("/")[-1]
+
+        # Skip if file_name is <= last processed file
+        if start_value and file_name <= start_value:
+            continue
+
+        logger.info(f"Processing Baseline file: {file_path}")
 
         # 3. Open stream (decompression handled by open_remote_file/fsspec)
         with open_remote_file(host, file_path) as f:
@@ -84,6 +102,9 @@ def pubmed_updates(
     Uses incremental loading to skip already processed files.
     """
     files = list_remote_files(host, "/pubmed/updatefiles/")
+
+    # Explicitly sort to ensure safety
+    files = sorted(files)
 
     # Filter files based on incremental state
     # last_file.last_value is the file_name (e.g., pubmed24n1001.xml.gz)
