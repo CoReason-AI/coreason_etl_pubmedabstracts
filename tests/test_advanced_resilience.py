@@ -10,7 +10,7 @@
 
 import unittest
 from io import BytesIO
-from typing import Optional, Dict, Any
+from typing import Any
 
 from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
 
@@ -115,7 +115,7 @@ class TestAdvancedResilience(unittest.TestCase):
                 </Article>
             </MedlineCitation>
         </PubmedArticleSet>
-        """.encode('utf-8')
+        """.encode("utf-8")
 
         stream = BytesIO(xml_content)
         records = list(parse_pubmed_xml(stream))
@@ -143,7 +143,7 @@ class TestAdvancedResilience(unittest.TestCase):
         # without a custom PL/pgSQL function or simple case logic for days.
 
         # Valid Date
-        self._simulate_make_date(2023, 2, 28) # Should pass
+        self._simulate_make_date(2023, 2, 28)  # Should pass
 
         # Invalid Date - Logic Verification
         with self.assertRaises(ValueError):
@@ -154,4 +154,5 @@ class TestAdvancedResilience(unittest.TestCase):
         Python simulation of Postgres make_date strictness.
         """
         import datetime
+
         return datetime.date(year, month, day)
