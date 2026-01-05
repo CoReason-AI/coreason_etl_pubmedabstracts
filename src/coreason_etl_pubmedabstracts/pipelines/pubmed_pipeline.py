@@ -68,6 +68,9 @@ def pubmed_baseline(
     # 1. List files
     files = list_remote_files(host, "/pubmed/baseline/")
 
+    # Explicitly sort to ensure safety even if list_remote_files (or FTP) returns unsorted
+    files = sorted(files)
+
     # Filter files based on incremental state
     start_value = last_file.last_value if last_file else None
 
@@ -99,6 +102,9 @@ def pubmed_updates(
     Uses incremental loading to skip already processed files.
     """
     files = list_remote_files(host, "/pubmed/updatefiles/")
+
+    # Explicitly sort to ensure safety
+    files = sorted(files)
 
     # Filter files based on incremental state
     # last_file.last_value is the file_name (e.g., pubmed24n1001.xml.gz)
