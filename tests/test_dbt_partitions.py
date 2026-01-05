@@ -93,12 +93,11 @@ def test_partitioned_table_macro_renders_partitions() -> None:
     # Check bounds (robust to whitespace by splitting)
     cleaned_rendered = re.sub(r"\s+", " ", rendered)
 
-    assert (
-        'PARTITION OF "my_schema"."gold_table" FOR VALUES FROM (2024) TO (2025)' in cleaned_rendered
-    ), "Partition bounds for year 2024 not found"
-    assert (
-        'PARTITION OF "my_schema"."gold_table" FOR VALUES FROM (1900) TO (1901)' in cleaned_rendered
-    ), "Partition bounds for year 1900 not found"
+    expected_2024 = 'PARTITION OF "my_schema"."gold_table" FOR VALUES FROM (2024) TO (2025)'
+    assert expected_2024 in cleaned_rendered, "Partition bounds for year 2024 not found"
+
+    expected_1900 = 'PARTITION OF "my_schema"."gold_table" FOR VALUES FROM (1900) TO (1901)'
+    assert expected_1900 in cleaned_rendered, "Partition bounds for year 1900 not found"
 
 
 if __name__ == "__main__":
