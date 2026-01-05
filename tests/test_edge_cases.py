@@ -55,7 +55,8 @@ class TestEdgeCases(unittest.TestCase):
         Verify handling of namespaces.
 
         We expect the parser to correctly identify the record type even with namespaces,
-        and inject `_record_type`. Keys will still have prefixes as per xmltodict default.
+        and inject `_record_type`.
+        Crucially, we now STRIP namespaces to ensure consistent JSON structure.
         """
         xml_content = b"""
         <ns:PubmedArticleSet xmlns:ns="http://example.com/ns">
@@ -70,8 +71,9 @@ class TestEdgeCases(unittest.TestCase):
         self.assertEqual(len(records), 1)
         record = records[0]
 
-        # xmltodict preserves prefixes
-        self.assertIn("ns:MedlineCitation", record)
+        # We strip namespaces now
+        self.assertIn("MedlineCitation", record)
+        self.assertNotIn("ns:MedlineCitation", record)
 
         # Updated behavior: _record_type IS injected correctly
         self.assertEqual(record.get("_record_type"), "citation")

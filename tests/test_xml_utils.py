@@ -188,13 +188,13 @@ class TestXmlUtils(unittest.TestCase):
         records = list(parse_pubmed_xml(stream))
 
         self.assertEqual(len(records), 1)
-        # Check if keys have namespaces. xmltodict preserves them by default.
-        # The key should be "ns:MedlineCitation"
-        self.assertIn("ns:MedlineCitation", records[0])
+        # Check if keys have namespaces.
+        # We strip namespaces now, so keys should be clean.
+        self.assertIn("MedlineCitation", records[0])
         self.assertEqual(records[0]["_record_type"], "citation")
 
-        citation = records[0]["ns:MedlineCitation"]
-        title = citation["ns:Article"]["ns:ArticleTitle"]
+        citation = records[0]["MedlineCitation"]
+        title = citation["Article"]["ArticleTitle"]
 
         # Verify flattening worked (<i> tag stripped)
         self.assertIn("Namespace mixed content.", title.replace("\n", " ").replace("  ", " "))
