@@ -27,13 +27,8 @@ final as (
             else null
         end as publication_year,
 
-        -- Use default date logic if needed, strictly we just need year for partitioning
-        make_date(
-            coalesce(
-                case when pub_year ~ '^\d+$' then (pub_year)::int else null end,
-                1900
-            ), 1, 1
-        ) as publication_date,
+        -- Use calculated date from Silver layer
+        publication_date,
 
         authors,
         mesh_terms,
