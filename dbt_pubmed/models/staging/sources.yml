@@ -2,7 +2,7 @@ version: 2
 
 sources:
   - name: pubmed
-    schema: "{{ env_var('DBT_SOURCE_SCHEMA', 'public') }}"
+    schema: "{{ env_var('PGSCHEMA', 'public') }}"
     tables:
       - name: bronze_pubmed_baseline
       - name: bronze_pubmed_updates

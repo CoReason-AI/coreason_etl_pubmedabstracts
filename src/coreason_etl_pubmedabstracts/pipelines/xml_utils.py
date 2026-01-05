@@ -84,10 +84,23 @@ def parse_pubmed_xml(file_stream: IO[bytes]) -> Iterator[Dict[str, Any]]:
                         # Strip all child tags (preserving text)
                         etree.strip_tags(node, "*")
 
+                # Strip Namespaces: iterate over all elements and remove namespace from tag
+                # This ensures xmltodict produces clean keys (e.g., "PMID" instead of "ns1:PMID")
+                for node in elem.iter():
+                    if "}" in node.tag:
+                        node.tag = etree.QName(node).localname
+                    # Also strip attributes if needed? (Usually attributes don't have NS in this schema)
+                    # But if they do, we might want to clean them too.
+                    # For now, tag stripping is critical for JSON structure.
+
+                # Remove xmlns attributes from root to prevent xmltodict from thinking they are attrs
+                etree.cleanup_namespaces(elem)
+
                 # Convert the lxml element to a string
                 xml_str = etree.tostring(elem, encoding="unicode")
 
                 # Parse with xmltodict, forcing specific keys to be lists
+                # process_namespaces=False is default, which is fine since we stripped them manually.
                 doc = xmltodict.parse(xml_str, force_list=FORCE_LIST_KEYS)
 
                 # Inject _record_type based on the known tag name
