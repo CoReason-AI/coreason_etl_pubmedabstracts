@@ -62,8 +62,10 @@ def pubmed_baseline(
     Iterates over all baseline files, parses them, and yields records.
     Uses incremental loading to allow resuming from the last processed file.
 
-    Note: The write_disposition is 'append' to support resuming.
-    A full reload requires dropping the table or resetting the state manually.
+    Strategy: "Resumable Replace"
+    - The write_disposition is 'append' to enable 'incremental' tracking (dlt doesn't support incremental on 'replace').
+    - To satisfy the "Annual Reload" (Replace) requirement, the orchestration layer (main.py)
+      detects if this is a Fresh Run (no state) and explicitly TRUNCATES the table before loading.
     """
     # 1. List files
     files = list_remote_files(host, "/pubmed/baseline/")

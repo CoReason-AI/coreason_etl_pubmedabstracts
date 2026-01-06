@@ -10,7 +10,7 @@
 
 import subprocess
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 from coreason_etl_pubmedabstracts.main import get_args, main, run_dbt_transformations, run_pipeline
 
@@ -239,3 +239,168 @@ class TestMainOrchestration(unittest.TestCase):
 
         # Verify dbt was NOT called
         mock_run_dbt.assert_not_called()
+
+    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
+    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
+    def test_fresh_baseline_truncates(
+        self,
+        mock_run_dbt: MagicMock,
+        mock_source_func: MagicMock,
+        mock_sweep: MagicMock,
+        mock_pipeline: MagicMock,
+    ) -> None:
+        """Test that fresh run triggers TRUNCATE."""
+        mock_p_instance = MagicMock()
+        mock_pipeline.return_value = mock_p_instance
+        mock_p_instance.dataset_name = "test_ds"
+
+        # Mock success run
+        mock_info = MagicMock()
+        mock_info.has_failed_jobs = False
+        mock_p_instance.run.return_value = mock_info
+
+        # Mock empty state
+        mock_p_instance.state = {}
+
+        # Mock sql client
+        mock_client = MagicMock()
+        mock_p_instance.sql_client.return_value.__enter__.return_value = mock_client
+
+        # Mock source
+        mock_source_obj = MagicMock()
+        mock_source_obj.name = "pubmed_source"  # Default name
+        mock_source_func.return_value = mock_source_obj
+        mock_filtered = MagicMock()
+        mock_source_obj.with_resources.return_value = mock_filtered
+
+        run_pipeline("baseline")
+
+        # Verify TRUNCATE called
+        mock_client.execute_sql.assert_called_with("TRUNCATE TABLE test_ds.bronze_pubmed_baseline")
+
+    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
+    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
+    def test_resume_baseline_skips_truncate(
+        self,
+        mock_run_dbt: MagicMock,
+        mock_source_func: MagicMock,
+        mock_sweep: MagicMock,
+        mock_pipeline: MagicMock,
+    ) -> None:
+        """Test that resuming run skips TRUNCATE."""
+        mock_p_instance = MagicMock()
+        mock_pipeline.return_value = mock_p_instance
+        mock_p_instance.dataset_name = "test_ds"
+
+        # Mock success run
+        mock_info = MagicMock()
+        mock_info.has_failed_jobs = False
+        mock_p_instance.run.return_value = mock_info
+
+        # Mock populated state
+        mock_p_instance.state = {
+            "sources": {
+                "pubmed_source": {
+                    "resources": {
+                        "pubmed_baseline": {"incremental": {"file_name": {"last_value": "pubmed24n0001.xml.gz"}}}
+                    }
+                }
+            }
+        }
+
+        mock_client = MagicMock()
+        mock_p_instance.sql_client.return_value.__enter__.return_value = mock_client
+
+        mock_source_obj = MagicMock()
+        mock_source_obj.name = "pubmed_source"
+        mock_source_func.return_value = mock_source_obj
+        mock_filtered = MagicMock()
+        mock_filtered.name = "pubmed_source"
+        mock_source_obj.with_resources.return_value = mock_filtered
+
+        run_pipeline("baseline")
+
+        # Verify TRUNCATE NOT called
+        mock_client.execute_sql.assert_not_called()
+
+    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
+    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
+    def test_baseline_truncate_exception(
+        self,
+        mock_run_dbt: MagicMock,
+        mock_source_func: MagicMock,
+        mock_sweep: MagicMock,
+        mock_pipeline: MagicMock,
+    ) -> None:
+        """Test exception handling during truncate."""
+        mock_p_instance = MagicMock()
+        mock_pipeline.return_value = mock_p_instance
+        mock_p_instance.dataset_name = "test_ds"
+
+        # Mock success run
+        mock_info = MagicMock()
+        mock_info.has_failed_jobs = False
+        mock_p_instance.run.return_value = mock_info
+
+        # Fresh run
+        mock_p_instance.state = {}
+
+        # Mock client to raise exception
+        mock_client = MagicMock()
+        mock_p_instance.sql_client.return_value.__enter__.return_value = mock_client
+        mock_client.execute_sql.side_effect = Exception("Table missing")
+
+        # Setup source
+        mock_source_obj = MagicMock()
+        mock_source_obj.name = "pubmed_source"
+        mock_source_func.return_value = mock_source_obj
+        mock_filtered = MagicMock()
+        mock_filtered.name = "pubmed_source"
+        mock_source_obj.with_resources.return_value = mock_filtered
+
+        # Should not raise
+        run_pipeline("baseline")
+
+        # Verify attempt
+        mock_client.execute_sql.assert_called()
+
+    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
+    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
+    def test_baseline_state_access_failure(
+        self,
+        mock_run_dbt: MagicMock,
+        mock_source_func: MagicMock,
+        mock_sweep: MagicMock,
+        mock_pipeline: MagicMock,
+    ) -> None:
+        """Test exception during state access is logged and ignored."""
+        mock_p_instance = MagicMock()
+        mock_pipeline.return_value = mock_p_instance
+
+        # Mock successful run
+        mock_info = MagicMock()
+        mock_info.has_failed_jobs = False
+        mock_p_instance.run.return_value = mock_info
+
+        # Accessing state raises error
+        type(mock_p_instance).state = PropertyMock(side_effect=Exception("State Corrupt"))
+
+        mock_source_obj = MagicMock()
+        mock_source_obj.name = "pubmed_source"
+        mock_source_func.return_value = mock_source_obj
+        mock_filtered = MagicMock()
+        mock_filtered.name = "pubmed_source"
+        mock_source_obj.with_resources.return_value = mock_filtered
+
+        run_pipeline("baseline")
+
+        # Should not crash
+        mock_p_instance.run.assert_called()
