@@ -12,7 +12,6 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import dlt
-from dlt.sources import DltResource
 
 from coreason_etl_pubmedabstracts.main import _prepare_baseline_load
 from coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline import _create_pubmed_resource

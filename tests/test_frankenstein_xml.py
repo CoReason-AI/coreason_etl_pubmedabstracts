@@ -49,7 +49,8 @@ class TestFrankensteinXml(unittest.TestCase):
                         <Title>Journal of Chaos 🧪</Title>
                         <ISOAbbreviation>J. Chaos</ISOAbbreviation>
                     </Journal>
-                    <ArticleTitle>A study of <b>bold</b> and <ns:i>italic</ns:i> mixed content with namespaces.</ArticleTitle>
+                    <ArticleTitle>A study of <b>bold</b> and <ns:i>italic</ns:i>
+                    mixed content with namespaces.</ArticleTitle>
                     <Abstract>
                         <AbstractText Label="BACKGROUND" NlmCategory="BACKGROUND">
                             Here is some <![CDATA[CDATA content]]> and a complex chemical.
@@ -94,8 +95,10 @@ class TestFrankensteinXml(unittest.TestCase):
 
         # 2. Mixed Content should be flattened
         # "A study of bold and italic mixed content with namespaces."
+        # Note: Newline might be introduced by formatting above.
         title = citation["Article"]["ArticleTitle"]
-        self.assertIn("A study of bold and italic mixed content", title)
+        self.assertIn("A study of bold and italic", title)
+        self.assertIn("mixed content", title)
 
         # 3. Force List Keys
         authors = citation["Article"]["AuthorList"]["Author"]
