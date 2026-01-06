@@ -76,6 +76,29 @@ models:
       - unique:
           column_name: "source_id || '-' || author_rank::text"
 
+  - name: gold_pubmed_mesh
+    description: "Flattened view of MeSH terms."
+    columns:
+      - name: coreason_id
+        description: "The Coreason ID of the article."
+        tests:
+          - not_null
+      - name: source_id
+        description: "The PMID."
+        tests:
+          - not_null
+      - name: mesh_id
+        description: "Deterministic UUID for the MeSH term."
+        tests:
+          - not_null
+      - name: descriptor_name
+        description: "The name of the MeSH descriptor."
+      - name: descriptor_ui
+        description: "The unique identifier of the MeSH descriptor."
+    tests:
+      - unique:
+          column_name: "source_id || '-' || mesh_id"
+
   - name: gold_pubmed_knowledge
     description: "The final Gold layer table partitioned by year."
     columns:
