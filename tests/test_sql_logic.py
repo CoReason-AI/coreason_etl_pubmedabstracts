@@ -144,6 +144,26 @@ class TestStagingLayerJsonLogic(unittest.TestCase):
         else:
             return str(abstract_node["#text"])
 
+    def _simulate_doi_extraction(self, elocation_node: Any) -> Union[str, None]:
+        """
+        Simulate the SQL logic for extracting DOI from ELocationID array.
+        SQL: select item->>'#text' from jsonb_array_elements(...) where item->>'@EIdType' = 'doi' limit 1
+        """
+        if not elocation_node:
+            return None
+
+        # In SQL, we coalesce to '[]' if null, so if elocation_node is None we return None (done above).
+        # We assume input is a list because FORCE_LIST_KEYS ensures it is a list if present.
+        if isinstance(elocation_node, list):
+            for item in elocation_node:
+                # Handle polymorphic item: string or dict
+                # If string, it has no attributes, so @EIdType is null -> no match.
+                if isinstance(item, dict):
+                    eid_type = item.get("@EIdType")
+                    if eid_type == "doi":
+                        return item.get("#text")
+        return None
+
     def test_pmid_simple_string(self) -> None:
         data = ["12345"]
         result = self._simulate_pmid_extraction(data)
@@ -196,6 +216,43 @@ class TestStagingLayerJsonLogic(unittest.TestCase):
         self.assertEqual(self._simulate_abstract_extraction(None), "")
         # Empty list
         self.assertEqual(self._simulate_abstract_extraction([]), "")
+
+    # --- Added Complex Edge Cases ---
+
+    def test_doi_extraction_complex(self) -> None:
+        """
+        Verify finding a DOI hidden in a list of other ELocationIDs.
+        Simulates: ELocationID is a list with [pii, doi, other].
+        """
+        data = [
+            {"#text": "S0000-0000(00)00000-0", "@EIdType": "pii"},
+            {"#text": "10.1016/j.test.2023.01.001", "@EIdType": "doi"},
+            {"#text": "AnotherID", "@EIdType": "publisher-id"},
+        ]
+        result = self._simulate_doi_extraction(data)
+        self.assertEqual(result, "10.1016/j.test.2023.01.001")
+
+    def test_doi_extraction_no_doi(self) -> None:
+        """Verify correct None return when no DOI is present in the list."""
+        data = [
+            {"#text": "S0000-0000(00)00000-0", "@EIdType": "pii"},
+        ]
+        result = self._simulate_doi_extraction(data)
+        self.assertIsNone(result)
+
+    def test_abstract_complex_construction(self) -> None:
+        """
+        Verify correct string concatenation when AbstractText is a mix of simple strings
+        and labelled sections (dictionaries).
+        This mimics <AbstractText Label="BACKGROUND">...</AbstractText> <AbstractText>...</AbstractText>
+        """
+        data: List[Union[str, Dict[str, str]]] = [
+            {"#text": "Background info.", "@Label": "BACKGROUND"},
+            "More info.",
+            {"#text": "Methods info.", "@Label": "METHODS"},
+        ]
+        result = self._simulate_abstract_extraction(data)
+        self.assertEqual(result, "Background info. More info. Methods info.")
 
 
 class TestPhysicalHardDeleteLogic(unittest.TestCase):
@@ -253,7 +310,13 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
     def test_upsert_logic(self) -> None:
         current = [{"source_id": "1", "ingestion_ts": 100.0, "title": "Old"}]
         batch = [
-            {"pmid": "1", "operation": "upsert", "ingestion_ts": 110.0, "file_name": "f2", "title": "New"},
+            {
+                "pmid": "1",
+                "operation": "upsert",
+                "ingestion_ts": 110.0,
+                "file_name": "f2",
+                "title": "New",
+            },
         ]
         result = self._simulate_dbt_run(current, batch, max_ts_in_table=105.0)
         self.assertEqual(len(result), 1)
@@ -261,7 +324,14 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
 
     def test_delete_existing(self) -> None:
         current = [{"source_id": "1", "ingestion_ts": 100.0, "title": "To Delete"}]
-        batch = [{"pmid": "1", "operation": "delete", "ingestion_ts": 110.0, "file_name": "f2"}]
+        batch = [
+            {
+                "pmid": "1",
+                "operation": "delete",
+                "ingestion_ts": 110.0,
+                "file_name": "f2",
+            }
+        ]
         result = self._simulate_dbt_run(current, batch, max_ts_in_table=105.0)
         self.assertEqual(len(result), 0)
 
@@ -499,3 +569,22 @@ class TestDateLogic(unittest.TestCase):
 
     def test_fallback(self) -> None:
         self.assertEqual(self._simulate_sql_date_logic("", "", "", ""), "1900-01-01")
+
+    # --- Added Complex Edge Cases for Dates ---
+
+    def test_pubyear_logic_precedence(self) -> None:
+        """
+        Verify that an explicit Year tag takes precedence over MedlineDate.
+        XML: <Year>2023</Year> <MedlineDate>2020 Spring</MedlineDate>
+        Expected: 2023
+        """
+        self.assertEqual(self._simulate_sql_date_logic("2023", "", "", "2020 Spring"), "2023-01-01")
+
+    def test_pubyear_medline_regex_complex(self) -> None:
+        """
+        Verify regex extraction from complex MedlineDate strings.
+        """
+        # Case: Range across years (take first)
+        self.assertEqual(self._simulate_sql_date_logic("", "", "", "2020-2021"), "2020-01-01")
+        # Case: Text before year
+        self.assertEqual(self._simulate_sql_date_logic("", "", "", "Published 2020"), "2020-01-01")
