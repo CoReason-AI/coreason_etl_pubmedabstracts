@@ -93,27 +93,61 @@ def run_pipeline(load_target: str, dry_run: bool = False) -> None:
 
     logger.info(f"Running resources: {resources_to_run}")
 
-    # 1. Run the Pipeline
+    # 1. Prepare Source
     source = pubmed_source()
     # Filter resources using .with_resources()
     source = source.with_resources(*resources_to_run)
 
+    # 2. Resumable Replace Logic for Baseline
+    # We check if we are running baseline. If so, and if no incremental state exists
+    # (meaning a fresh run), we truncate the table to simulate "Replace" behavior
+    # while allowing subsequent runs to "Resume" (Append).
+    if "pubmed_baseline" in resources_to_run:
+        logger.info("Checking incremental state for pubmed_baseline...")
+        try:
+            # dlt state logic: check if 'pubmed_baseline' has processed files
+            # The structure is: sources -> source_name -> resources -> resource_name -> incremental -> param
+            state = pipeline.state
+            source_state = state.get("sources", {}).get(source.name, {})
+            resource_state = source_state.get("resources", {}).get("pubmed_baseline", {})
+            incremental_state = resource_state.get("incremental", {}).get("file_name", {})
+
+            # If no last_value, it implies a fresh run (or state reset).
+            if not incremental_state.get("last_value"):
+                logger.info("No incremental state found (Fresh Run). Truncating 'bronze_pubmed_baseline'...")
+                # Use fully qualified table name: dataset_name.table_name
+                table_name = f"{pipeline.dataset_name}.bronze_pubmed_baseline"
+                with pipeline.sql_client() as client:
+                    try:
+                        client.execute_sql(f"TRUNCATE TABLE {table_name}")
+                        logger.info(f"Successfully truncated {table_name}.")
+                    except Exception as e:
+                        logger.warning(f"Could not truncate {table_name} (might not exist yet): {e}")
+            else:
+                logger.info(
+                    f"Incremental state found (Resuming from {incremental_state.get('last_value')}). Skipping truncate."
+                )
+
+        except Exception as e:
+            logger.warning(f"State check/truncation failed: {e}. Proceeding with load.")
+
+    # 3. Run the Pipeline
     info = pipeline.run(source)
     logger.info(f"Pipeline run completed. Load Info: {info}")
 
-    # 2. Check for success (basic check)
+    # 4. Check for success (basic check)
     if info.has_failed_jobs:
         logger.error("Pipeline run reported failed jobs!")
         sys.exit(1)
 
-    # 3. Conditional Deduplication Sweep
+    # 5. Conditional Deduplication Sweep
     # Only run if we loaded the baseline (and it was successful)
     if "pubmed_baseline" in resources_to_run:
         logger.info("Baseline loaded. Triggering Deduplication Sweep...")
         run_deduplication_sweep(pipeline)
         logger.info("Deduplication Sweep finished.")
 
-    # 4. Run dbt transformations
+    # 6. Run dbt transformations
     # This runs regardless of load target, as updates also need transformation (Silver/Gold)
     run_dbt_transformations()
 
