@@ -11,7 +11,7 @@
 import hashlib
 import json
 import time
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List
 
 import dlt
 from dlt.sources import DltResource
@@ -40,7 +40,7 @@ def _wrap_record(record: Dict[str, Any], file_name: str) -> Dict[str, Any]:
     }
 
 
-@dlt.transformer(name="pubmed_xml_parser")
+@dlt.transformer(name="pubmed_xml_parser")  # type: ignore[misc]
 def pubmed_xml_parser(file_items: List[FileItem]) -> Iterator[Dict[str, Any]]:
     """
     Transformer that takes a list of FileItems (yielded by dlt.sources.filesystem),
@@ -71,7 +71,7 @@ def pubmed_xml_parser(file_items: List[FileItem]) -> Iterator[Dict[str, Any]]:
             raise e
 
 
-@dlt.source
+@dlt.source  # type: ignore[misc]
 def pubmed_source() -> Iterator[DltResource]:
     """
     The main DLT source for PubMed using native filesystem logic.

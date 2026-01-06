@@ -87,10 +87,7 @@ class TestPubmedPipeline(unittest.TestCase):
         mock_file_item.open.return_value.__enter__.return_value = mock_file_handle
 
         # Mock parser output
-        mock_parse.return_value = iter([
-            {"MedlineCitation": {"PMID": "123"}},
-            {"MedlineCitation": {"PMID": "456"}}
-        ])
+        mock_parse.return_value = iter([{"MedlineCitation": {"PMID": "123"}}, {"MedlineCitation": {"PMID": "456"}}])
 
         source_data = [[mock_file_item]]
         source = dlt.resource(source_data, name="dummy_source")
