@@ -27,17 +27,15 @@ class TestMainOrchestration(unittest.TestCase):
         self.assertTrue(args.dry_run)
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
     @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
     def test_run_pipeline_all(
         self,
         mock_run_dbt: MagicMock,
         mock_source_func: MagicMock,
-        mock_sweep: MagicMock,
         mock_pipeline: MagicMock,
     ) -> None:
-        """Test running all resources triggers sweep and dbt."""
+        """Test running all resources triggers dbt."""
         # Setup mock pipeline
         mock_p_instance = MagicMock()
         mock_pipeline.return_value = mock_p_instance
@@ -70,24 +68,19 @@ class TestMainOrchestration(unittest.TestCase):
         # Verify run called with filtered source
         mock_p_instance.run.assert_called_once_with(mock_filtered_source)
 
-        # Verify sweep called
-        mock_sweep.assert_called_once_with(mock_p_instance)
-
         # Verify dbt called
         mock_run_dbt.assert_called_once()
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
     @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
     def test_run_pipeline_updates_only(
         self,
         mock_run_dbt: MagicMock,
         mock_source_func: MagicMock,
-        mock_sweep: MagicMock,
         mock_pipeline: MagicMock,
     ) -> None:
-        """Test running only updates does NOT trigger sweep but runs dbt."""
+        """Test running only updates runs dbt."""
         mock_p_instance = MagicMock()
         mock_pipeline.return_value = mock_p_instance
         mock_info = MagicMock()
@@ -107,32 +100,25 @@ class TestMainOrchestration(unittest.TestCase):
         # Verify run called with updates only
         mock_p_instance.run.assert_called_once_with(mock_filtered_source)
 
-        # Verify sweep NOT called
-        mock_sweep.assert_not_called()
-
         # Verify dbt called
         mock_run_dbt.assert_called_once()
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
     @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
-    def test_dry_run(self, mock_dbt: MagicMock, mock_sweep: MagicMock, mock_pipeline: MagicMock) -> None:
+    def test_dry_run(self, mock_dbt: MagicMock, mock_pipeline: MagicMock) -> None:
         """Test dry run skips execution."""
         run_pipeline("all", dry_run=True)
 
         mock_pipeline.assert_called_once()
         mock_pipeline.return_value.run.assert_not_called()
-        mock_sweep.assert_not_called()
         mock_dbt.assert_not_called()
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
     @patch("coreason_etl_pubmedabstracts.main.sys.exit")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
     @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
-    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
     def test_failed_jobs_exit(
         self,
-        mock_sweep: MagicMock,
         mock_dbt: MagicMock,
         mock_source: MagicMock,
         mock_exit: MagicMock,
@@ -210,45 +196,12 @@ class TestMainOrchestration(unittest.TestCase):
             run_dbt_transformations()
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
-    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
-    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
-    def test_deduplication_failure_skips_dbt(
-        self,
-        mock_run_dbt: MagicMock,
-        mock_source_func: MagicMock,
-        mock_sweep: MagicMock,
-        mock_pipeline: MagicMock,
-    ) -> None:
-        """Test that if deduplication fails, dbt is NOT run."""
-        mock_p_instance = MagicMock()
-        mock_pipeline.return_value = mock_p_instance
-        mock_info = MagicMock()
-        mock_info.has_failed_jobs = False
-        mock_p_instance.run.return_value = mock_info
-
-        # Mock source
-        mock_source_obj = MagicMock()
-        mock_source_func.return_value = mock_source_obj
-
-        # Deduplication fails
-        mock_sweep.side_effect = Exception("Dedup failed")
-
-        with self.assertRaisesRegex(Exception, "Dedup failed"):
-            run_pipeline("all")
-
-        # Verify dbt was NOT called
-        mock_run_dbt.assert_not_called()
-
-    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
     @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
     def test_fresh_baseline_truncates(
         self,
         mock_run_dbt: MagicMock,
         mock_source_func: MagicMock,
-        mock_sweep: MagicMock,
         mock_pipeline: MagicMock,
     ) -> None:
         """Test that fresh run triggers TRUNCATE."""
@@ -281,14 +234,12 @@ class TestMainOrchestration(unittest.TestCase):
         mock_client.execute_sql.assert_called_with("TRUNCATE TABLE test_ds.bronze_pubmed_baseline")
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
     @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
     def test_resume_baseline_skips_truncate(
         self,
         mock_run_dbt: MagicMock,
         mock_source_func: MagicMock,
-        mock_sweep: MagicMock,
         mock_pipeline: MagicMock,
     ) -> None:
         """Test that resuming run skips TRUNCATE."""
@@ -328,14 +279,12 @@ class TestMainOrchestration(unittest.TestCase):
         mock_client.execute_sql.assert_not_called()
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
     @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
     def test_baseline_truncate_exception(
         self,
         mock_run_dbt: MagicMock,
         mock_source_func: MagicMock,
-        mock_sweep: MagicMock,
         mock_pipeline: MagicMock,
     ) -> None:
         """Test exception handling during truncate."""
@@ -371,14 +320,12 @@ class TestMainOrchestration(unittest.TestCase):
         mock_client.execute_sql.assert_called()
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.run_deduplication_sweep")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
     @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
     def test_baseline_state_access_failure(
         self,
         mock_run_dbt: MagicMock,
         mock_source_func: MagicMock,
-        mock_sweep: MagicMock,
         mock_pipeline: MagicMock,
     ) -> None:
         """Test exception during state access is logged and ignored."""
