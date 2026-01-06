@@ -14,6 +14,7 @@ import sys
 from typing import List, Optional
 
 import dlt
+from dlt.sources import DltSource
 
 from coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline import pubmed_source
 from coreason_etl_pubmedabstracts.utils.logger import logger
@@ -54,6 +55,41 @@ def run_dbt_transformations(project_dir: str = "dbt_pubmed") -> None:
     except subprocess.CalledProcessError as e:
         logger.error(f"dbt transformations failed with exit code {e.returncode}")
         raise e
+
+
+def _prepare_baseline_load(pipeline: dlt.Pipeline, source: DltSource) -> None:
+    """
+    Handles "Resumable Replace" logic for the baseline load.
+    Checks if incremental state exists for 'pubmed_baseline'.
+    If not (fresh run), truncates the target table to ensure a clean start.
+    """
+    logger.info("Checking incremental state for pubmed_baseline...")
+    try:
+        # dlt state logic: check if 'pubmed_baseline' has processed files
+        # The structure is: sources -> source_name -> resources -> resource_name -> incremental -> param
+        state = pipeline.state
+        source_state = state.get("sources", {}).get(source.name, {})
+        resource_state = source_state.get("resources", {}).get("pubmed_baseline", {})
+        incremental_state = resource_state.get("incremental", {}).get("file_name", {})
+
+        # If no last_value, it implies a fresh run (or state reset).
+        if not incremental_state.get("last_value"):
+            logger.info("No incremental state found (Fresh Run). Truncating 'bronze_pubmed_baseline'...")
+            # Use fully qualified table name: dataset_name.table_name
+            table_name = f"{pipeline.dataset_name}.bronze_pubmed_baseline"
+            with pipeline.sql_client() as client:
+                try:
+                    client.execute_sql(f"TRUNCATE TABLE {table_name}")
+                    logger.info(f"Successfully truncated {table_name}.")
+                except Exception as e:
+                    logger.warning(f"Could not truncate {table_name} (might not exist yet): {e}")
+        else:
+            logger.info(
+                f"Incremental state found (Resuming from {incremental_state.get('last_value')}). Skipping truncate."
+            )
+
+    except Exception as e:
+        logger.warning(f"State check/truncation failed: {e}. Proceeding with load.")
 
 
 def run_pipeline(load_target: str, dry_run: bool = False) -> None:
@@ -98,37 +134,8 @@ def run_pipeline(load_target: str, dry_run: bool = False) -> None:
     source = source.with_resources(*resources_to_run)
 
     # 2. Resumable Replace Logic for Baseline
-    # We check if we are running baseline. If so, and if no incremental state exists
-    # (meaning a fresh run), we truncate the table to simulate "Replace" behavior
-    # while allowing subsequent runs to "Resume" (Append).
     if "pubmed_baseline" in resources_to_run:
-        logger.info("Checking incremental state for pubmed_baseline...")
-        try:
-            # dlt state logic: check if 'pubmed_baseline' has processed files
-            # The structure is: sources -> source_name -> resources -> resource_name -> incremental -> param
-            state = pipeline.state
-            source_state = state.get("sources", {}).get(source.name, {})
-            resource_state = source_state.get("resources", {}).get("pubmed_baseline", {})
-            incremental_state = resource_state.get("incremental", {}).get("file_name", {})
-
-            # If no last_value, it implies a fresh run (or state reset).
-            if not incremental_state.get("last_value"):
-                logger.info("No incremental state found (Fresh Run). Truncating 'bronze_pubmed_baseline'...")
-                # Use fully qualified table name: dataset_name.table_name
-                table_name = f"{pipeline.dataset_name}.bronze_pubmed_baseline"
-                with pipeline.sql_client() as client:
-                    try:
-                        client.execute_sql(f"TRUNCATE TABLE {table_name}")
-                        logger.info(f"Successfully truncated {table_name}.")
-                    except Exception as e:
-                        logger.warning(f"Could not truncate {table_name} (might not exist yet): {e}")
-            else:
-                logger.info(
-                    f"Incremental state found (Resuming from {incremental_state.get('last_value')}). Skipping truncate."
-                )
-
-        except Exception as e:
-            logger.warning(f"State check/truncation failed: {e}. Proceeding with load.")
+        _prepare_baseline_load(pipeline, source)
 
     # 3. Run the Pipeline
     info = pipeline.run(source)
