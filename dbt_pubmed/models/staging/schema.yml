@@ -21,6 +21,22 @@ models:
       - name: doi
         description: "The Digital Object Identifier (DOI) of the article."
 
+  - name: stg_pubmed_citations
+    description: "Unified staging view combining Baseline and Updates. 1:1 view of parsed JSON."
+    columns:
+      - name: pmid
+        description: "The PubMed ID."
+        tests:
+          - not_null
+      - name: operation
+        description: "The operation type: 'upsert' or 'delete'."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['upsert', 'delete']
+      - name: file_name
+        description: "Source filename."
+
   - name: int_pubmed_deduped
     description: "Deduplicated view combining Baseline and Updates. Uses window functions to pick the latest version."
     columns:
