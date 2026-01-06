@@ -15,7 +15,6 @@ from typing import List, Optional
 
 import dlt
 
-from coreason_etl_pubmedabstracts.pipelines.deduplication import run_deduplication_sweep
 from coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline import pubmed_source
 from coreason_etl_pubmedabstracts.utils.logger import logger
 
@@ -140,14 +139,7 @@ def run_pipeline(load_target: str, dry_run: bool = False) -> None:
         logger.error("Pipeline run reported failed jobs!")
         sys.exit(1)
 
-    # 5. Conditional Deduplication Sweep
-    # Only run if we loaded the baseline (and it was successful)
-    if "pubmed_baseline" in resources_to_run:
-        logger.info("Baseline loaded. Triggering Deduplication Sweep...")
-        run_deduplication_sweep(pipeline)
-        logger.info("Deduplication Sweep finished.")
-
-    # 6. Run dbt transformations
+    # 5. Run dbt transformations
     # This runs regardless of load target, as updates also need transformation (Silver/Gold)
     run_dbt_transformations()
 
