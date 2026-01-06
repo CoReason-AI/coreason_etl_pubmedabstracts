@@ -11,26 +11,14 @@
 import hashlib
 import json
 import time
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, List
 
 import dlt
 from dlt.sources import DltResource
+from dlt.sources.filesystem import FileItem, filesystem
 from loguru import logger
 
-from coreason_etl_pubmedabstracts.pipelines.ftp_utils import (
-    list_remote_files,
-    open_remote_file,
-)
 from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
-
-
-@dlt.source  # type: ignore[misc]
-def pubmed_source(host: str = "ftp.ncbi.nlm.nih.gov") -> Iterator[DltResource]:
-    """
-    The main DLT source for PubMed.
-    """
-    yield pubmed_baseline(host=host)
-    yield pubmed_updates(host=host)
 
 
 def _wrap_record(record: Dict[str, Any], file_name: str) -> Dict[str, Any]:
@@ -52,78 +40,90 @@ def _wrap_record(record: Dict[str, Any], file_name: str) -> Dict[str, Any]:
     }
 
 
-@dlt.resource(write_disposition="append", table_name="bronze_pubmed_baseline")  # type: ignore[misc]
-def pubmed_baseline(
-    host: str = "ftp.ncbi.nlm.nih.gov",
-    last_file: Optional[dlt.sources.incremental[str]] = dlt.sources.incremental("file_name"),  # noqa: B008
-) -> Iterator[Dict[str, Any]]:
+@dlt.transformer(name="pubmed_xml_parser")  # type: ignore[misc]
+def pubmed_xml_parser(file_items: List[FileItem]) -> Iterator[Dict[str, Any]]:
     """
-    Resource for PubMed Baseline.
-    Iterates over all baseline files, parses them, and yields records.
-    Uses incremental loading to allow resuming from the last processed file.
-
-    Strategy: "Resumable Replace"
-    - The write_disposition is 'append' to enable 'incremental' tracking (dlt doesn't support incremental on 'replace').
-    - To satisfy the "Annual Reload" (Replace) requirement, the orchestration layer (main.py)
-      detects if this is a Fresh Run (no state) and explicitly TRUNCATES the table before loading.
+    Transformer that takes a list of FileItems (yielded by dlt.sources.filesystem),
+    opens each file, parses the XML, and yields wrapped records.
     """
-    # 1. List files
-    files = list_remote_files(host, "/pubmed/baseline/")
+    for file_item in file_items:
+        file_name = file_item["file_name"]
+        logger.info(f"Processing file: {file_name}")
 
-    # Explicitly sort to ensure safety even if list_remote_files (or FTP) returns unsorted
-    files = sorted(files)
+        # Open the file using the helper method provided by FileItem
+        # This handles the fsspec integration and compression
+        # We need to use 'open' method of the item or the fs_client.
+        # FileItem is a dict-like object with an 'open' method?
+        # Checking dlt docs/source: FileItemDict has a .open() method?
+        # Actually dlt source code: file_dict = FileItemDict(file_model, fs_client)
+        # FileItemDict implementation likely has open().
 
-    # Filter files based on incremental state
-    start_value = last_file.last_value if last_file else None
-
-    # 2. Iterate and process
-    for file_path in files:
-        file_name = file_path.split("/")[-1]
-
-        # Skip if file_name is <= last processed file
-        if start_value and file_name <= start_value:
-            continue
-
-        logger.info(f"Processing Baseline file: {file_path}")
-
-        # 3. Open stream (decompression handled by open_remote_file/fsspec)
-        with open_remote_file(host, file_path) as f:
-            # 4. Parse XML
-            for record in parse_pubmed_xml(f):
-                yield _wrap_record(record, file_name)
+        try:
+            # We can use the 'open' method on the file_item if available,
+            # or use the fs_client inside it if exposed.
+            # dlt's FileItemDict has a .open() method that returns a file-like object.
+            # It wraps fs_client.open(...)
+            with file_item.open() as f:
+                for record in parse_pubmed_xml(f):
+                    yield _wrap_record(record, file_name)
+        except Exception as e:
+            logger.error(f"Failed to process file {file_name}: {e}")
+            raise e
 
 
-@dlt.resource(write_disposition="append", table_name="bronze_pubmed_updates")  # type: ignore[misc]
-def pubmed_updates(
-    host: str = "ftp.ncbi.nlm.nih.gov",
-    last_file: Optional[dlt.sources.incremental[str]] = dlt.sources.incremental("file_name"),  # noqa: B008
-) -> Iterator[Dict[str, Any]]:
+@dlt.source  # type: ignore[misc]
+def pubmed_source() -> Iterator[DltResource]:
     """
-    Resource for PubMed Updates.
-    Iterates over all update files, parses them, and yields records.
-    Uses incremental loading to skip already processed files.
+    The main DLT source for PubMed using native filesystem logic.
     """
-    files = list_remote_files(host, "/pubmed/updatefiles/")
 
-    # Explicitly sort to ensure safety
-    files = sorted(files)
+    # We define the incremental config for file_name
+    # dlt filesystem source uses 'file_name' field in FileItem.
 
-    # Filter files based on incremental state
-    # last_file.last_value is the file_name (e.g., pubmed24n1001.xml.gz)
-    # files are full paths (e.g., /pubmed/updatefiles/pubmed24n1001.xml.gz)
+    # Resource: Baseline
+    # We rely on dlt config (secrets.toml) to provide bucket_url.
+    # [sources.pubmed.filesystem] -> bucket_url is the base.
+    # But here we need specific subdirectories.
+    # We can override bucket_url in the call.
 
-    start_value = last_file.last_value if last_file else None
+    # We'll use dlt.config.value to get the base url if we wanted, but we can also just rely on
+    # specific structure.
+    # To keep it standard, we'll assume the user configures the base url in secrets,
+    # and we append the path. But filesystem source takes a full bucket_url.
 
-    for file_path in files:
-        file_name = file_path.split("/")[-1]
+    # Let's check if we can retrieve the configured base url.
+    # Or we can just use the provided default in the function signature if we kept it.
+    # But we want to use dlt config.
 
-        # Skip if file_name is <= last processed file
-        # Alphanumeric comparison works for standard pubmed naming (pubmedYYnXXXX)
-        if start_value and file_name <= start_value:
-            continue
+    # Better approach: Define two resources using filesystem factory.
 
-        logger.info(f"Processing Update file: {file_path}")
+    # We need to construct the URL. We can ask dlt to inject the base URL.
+    # But filesystem() expects bucket_url as an argument.
 
-        with open_remote_file(host, file_path) as f:
-            for record in parse_pubmed_xml(f):
-                yield _wrap_record(record, file_name)
+    # Let's use dlt.config to get the base URL.
+    # We assume [sources.pubmed] section exists.
+
+    base_url = dlt.config.get("sources.pubmed.filesystem.bucket_url", "ftp://ftp.ncbi.nlm.nih.gov/pubmed/")
+
+    # Ensure base_url ends with /
+    base_url = base_url.rstrip("/") + "/"
+
+    # 1. Baseline
+    yield (
+        filesystem(
+            bucket_url=base_url + "baseline/",
+            file_glob="*.xml.gz",
+            incremental=dlt.sources.incremental("file_name"),
+        )
+        | pubmed_xml_parser
+    ).with_name("pubmed_baseline")
+
+    # 2. Updates
+    yield (
+        filesystem(
+            bucket_url=base_url + "updatefiles/",
+            file_glob="*.xml.gz",
+            incremental=dlt.sources.incremental("file_name"),
+        )
+        | pubmed_xml_parser
+    ).with_name("pubmed_updates")

@@ -10,49 +10,11 @@
 
 import io
 import unittest
-from unittest.mock import MagicMock, call, patch
 
-from coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline import pubmed_baseline
 from coreason_etl_pubmedabstracts.pipelines.xml_utils import parse_pubmed_xml
 
 
 class TestMoreComplexEdgeCases(unittest.TestCase):
-    @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.list_remote_files")
-    @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.open_remote_file")
-    @patch("coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline.parse_pubmed_xml")
-    def test_unsorted_ftp_listing_processed_sequentially(
-        self, mock_parse: MagicMock, mock_open: MagicMock, mock_list: MagicMock
-    ) -> None:
-        """
-        Verify that even if the FTP server returns files in random order,
-        the pipeline processes them in alphanumeric order.
-        This is critical for the 'incremental' logic (last_value) to work correctly.
-        """
-        # FTP returns files out of order
-        mock_list.return_value = [
-            "/pubmed/baseline/pubmed24n0003.xml.gz",
-            "/pubmed/baseline/pubmed24n0001.xml.gz",
-            "/pubmed/baseline/pubmed24n0002.xml.gz",
-        ]
-
-        # Setup mocks
-        mock_open.return_value.__enter__.return_value = MagicMock()
-        mock_parse.return_value = iter([])
-
-        # Run pipeline
-        resource = pubmed_baseline()
-        list(resource)
-
-        # Assertion: Verify that open_remote_file was called in SORTED order (0001, 0002, 0003)
-        expected_calls = [
-            call("ftp.ncbi.nlm.nih.gov", "/pubmed/baseline/pubmed24n0001.xml.gz"),
-            call("ftp.ncbi.nlm.nih.gov", "/pubmed/baseline/pubmed24n0002.xml.gz"),
-            call("ftp.ncbi.nlm.nih.gov", "/pubmed/baseline/pubmed24n0003.xml.gz"),
-        ]
-
-        # We compare call_args_list directly to avoid interference from child mock calls (context managers)
-        self.assertEqual(mock_open.call_args_list, expected_calls)
-
     def test_complex_namespace_shadowing(self) -> None:
         """
         Verify that namespace stripping works even with shadowed or complex namespaces.
