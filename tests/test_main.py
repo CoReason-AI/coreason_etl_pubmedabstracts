@@ -8,7 +8,6 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
-import subprocess
 import unittest
 from unittest.mock import MagicMock, PropertyMock, patch
 
@@ -68,8 +67,8 @@ class TestMainOrchestration(unittest.TestCase):
         # Verify run called with filtered source
         mock_p_instance.run.assert_called_once_with(mock_filtered_source)
 
-        # Verify dbt called
-        mock_run_dbt.assert_called_once()
+        # Verify dbt called with pipeline instance
+        mock_run_dbt.assert_called_once_with(mock_p_instance)
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
@@ -101,7 +100,7 @@ class TestMainOrchestration(unittest.TestCase):
         mock_p_instance.run.assert_called_once_with(mock_filtered_source)
 
         # Verify dbt called
-        mock_run_dbt.assert_called_once()
+        mock_run_dbt.assert_called_once_with(mock_p_instance)
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
     @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
@@ -170,30 +169,45 @@ class TestMainOrchestration(unittest.TestCase):
 
         mock_exit.assert_called_once_with(1)
 
-    @patch("coreason_etl_pubmedabstracts.main.subprocess.run")
-    def test_run_dbt_transformations_success(self, mock_subprocess: MagicMock) -> None:
-        """Test run_dbt_transformations success."""
-        run_dbt_transformations()
+    @patch("coreason_etl_pubmedabstracts.main.create_runner")
+    def test_run_dbt_transformations_success(self, mock_create_runner: MagicMock) -> None:
+        """Test run_dbt_transformations success with dlt runner."""
+        mock_pipeline = MagicMock()
+        mock_client = MagicMock()
+        mock_pipeline.destination_client.return_value.__enter__.return_value = mock_client
+        mock_client.config = "mock_config"
 
-        mock_subprocess.assert_called_once_with(
-            ["dbt", "build", "--project-dir", "dbt_pubmed"], check=True, capture_output=False
+        mock_runner_instance = MagicMock()
+        mock_create_runner.return_value = mock_runner_instance
+
+        run_dbt_transformations(mock_pipeline)
+
+        # Verify create_runner call
+        mock_create_runner.assert_called_once_with(
+            venv=None,
+            credentials="mock_config",
+            working_dir=".",
+            package_location="dbt_pubmed",
         )
 
-    @patch("coreason_etl_pubmedabstracts.main.subprocess.run")
-    def test_run_dbt_transformations_failure(self, mock_subprocess: MagicMock) -> None:
-        """Test run_dbt_transformations failure."""
-        mock_subprocess.side_effect = subprocess.CalledProcessError(1, ["dbt"])
+        # Verify execution of 'dbt build'
+        mock_runner_instance._run_dbt_command.assert_called_once_with("build", cmd_params=["--fail-fast"])
 
-        with self.assertRaises(subprocess.CalledProcessError):
-            run_dbt_transformations()
+    @patch("coreason_etl_pubmedabstracts.main.create_runner")
+    def test_run_dbt_transformations_failure(self, mock_create_runner: MagicMock) -> None:
+        """Test run_dbt_transformations failure handling."""
+        mock_pipeline = MagicMock()
+        mock_client = MagicMock()
+        mock_pipeline.destination_client.return_value.__enter__.return_value = mock_client
 
-    @patch("coreason_etl_pubmedabstracts.main.subprocess.run")
-    def test_run_dbt_transformations_not_found(self, mock_subprocess: MagicMock) -> None:
-        """Test run_dbt_transformations when dbt executable is missing."""
-        mock_subprocess.side_effect = FileNotFoundError()
+        mock_runner_instance = MagicMock()
+        mock_create_runner.return_value = mock_runner_instance
 
-        with self.assertRaises(FileNotFoundError):
-            run_dbt_transformations()
+        # Simulate failure in _run_dbt_command
+        mock_runner_instance._run_dbt_command.side_effect = Exception("DBT Failed")
+
+        with self.assertRaisesRegex(Exception, "DBT Failed"):
+            run_dbt_transformations(mock_pipeline)
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
