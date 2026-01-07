@@ -263,12 +263,24 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
     def _simulate_dbt_run(
         self, current_table: List[Dict[str, Any]], incoming_batch: List[Dict[str, Any]], max_ts_in_table: float
     ) -> List[Dict[str, Any]]:
+        """
+        Simulate the full logic including the new 'Blind Overwrite Protection'.
+        Logic:
+        1. Filter new records (ingestion_ts > watermark).
+        2. Deduplicate batch to find winner per PMID.
+        3. Merge logic:
+           - If ID exists in current table:
+             - Check if Batch Winner is 'better' than Current Record.
+             - Better = (Batch.file_name > Current.file_name) OR (Batch.file_name == Current.file_name AND Batch.ts > Current.ts)
+           - Else: Insert.
+        """
         pre_hook_watermark = max_ts_in_table
         new_records = [r for r in incoming_batch if r["ingestion_ts"] > pre_hook_watermark]
 
         if not new_records:
             return current_table
 
+        # 1. Deduplicate Batch (Latest Winner in Batch)
         batch_grouped: Dict[str, List[Dict[str, Any]]] = {}
         for r in new_records:
             pmid = str(r["pmid"])
@@ -276,39 +288,54 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
                 batch_grouped[pmid] = []
             batch_grouped[pmid].append(r)
 
-        upserts_to_apply = []
-        for _pmid, rows in batch_grouped.items():
-            rows.sort(key=lambda x: (x.get("file_name", ""), x["ingestion_ts"]), reverse=True)
-            winner = rows[0]
-            if winner["operation"] == "upsert":
-                upserts_to_apply.append(winner)
-
-        table_map = {str(r["source_id"]): r for r in current_table}
-        for up in upserts_to_apply:
-            target_record = {
-                "source_id": str(up["pmid"]),
-                "ingestion_ts": up["ingestion_ts"],
-                "file_name": up.get("file_name", ""),
-                "title": up.get("title", "Updated Title"),
-            }
-            table_map[target_record["source_id"]] = target_record
-
-        ids_to_delete = set()
+        batch_winners = {}
         for pmid, rows in batch_grouped.items():
+            # Sort by file_name desc, ingestion_ts desc
             rows.sort(key=lambda x: (x.get("file_name", ""), x["ingestion_ts"]), reverse=True)
-            winner = rows[0]
-            if winner["operation"] == "delete":
-                ids_to_delete.add(pmid)
+            batch_winners[pmid] = rows[0]
 
-        final_table = []
-        for source_id, record in table_map.items():
-            if source_id not in ids_to_delete:
-                final_table.append(record)
+        # 2. Apply to Target Table (Simulating Merge)
+        table_map = {str(r["source_id"]): r for r in current_table}
 
-        return final_table
+        for pmid, winner in batch_winners.items():
+            current_record = table_map.get(pmid)
+
+            should_apply = False
+            if current_record is None:
+                should_apply = True
+            else:
+                # Compare Batch Winner vs Current Record
+                b_file = winner.get("file_name", "")
+                c_file = current_record.get("file_name", "")
+                b_ts = winner["ingestion_ts"]
+                c_ts = current_record["ingestion_ts"]
+
+                if b_file > c_file:
+                    should_apply = True
+                elif b_file == c_file and b_ts > c_ts:
+                    should_apply = True
+                else:
+                    should_apply = False  # Blind Overwrite Protection Triggered
+
+            if should_apply:
+                if winner["operation"] == "upsert":
+                    # Update/Insert
+                    target_record = {
+                        "source_id": str(winner["pmid"]),
+                        "ingestion_ts": winner["ingestion_ts"],
+                        "file_name": winner.get("file_name", ""),
+                        "title": winner.get("title", "Updated Title"),
+                    }
+                    table_map[pmid] = target_record
+                elif winner["operation"] == "delete":
+                    # Delete
+                    if pmid in table_map:
+                        del table_map[pmid]
+
+        return list(table_map.values())
 
     def test_upsert_logic(self) -> None:
-        current = [{"source_id": "1", "ingestion_ts": 100.0, "title": "Old"}]
+        current = [{"source_id": "1", "ingestion_ts": 100.0, "title": "Old", "file_name": "f1"}]
         batch = [
             {
                 "pmid": "1",
@@ -323,7 +350,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         self.assertEqual(result[0]["title"], "New")
 
     def test_delete_existing(self) -> None:
-        current = [{"source_id": "1", "ingestion_ts": 100.0, "title": "To Delete"}]
+        current = [{"source_id": "1", "ingestion_ts": 100.0, "title": "To Delete", "file_name": "f1"}]
         batch = [
             {
                 "pmid": "1",
@@ -337,7 +364,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
 
     # ... (Keeping existing standard tests from previous step) ...
     def test_delete_then_upsert_in_batch(self) -> None:
-        current = [{"source_id": "1", "ingestion_ts": 100.0}]
+        current = [{"source_id": "1", "ingestion_ts": 100.0, "file_name": "f0"}]
         batch = [
             {"pmid": "1", "operation": "delete", "ingestion_ts": 110.0, "file_name": "f2"},
             {"pmid": "1", "operation": "upsert", "ingestion_ts": 111.0, "file_name": "f2"},
@@ -356,7 +383,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         self.assertEqual(len(result), 0)
 
     def test_stale_update_ignored(self) -> None:
-        current = [{"source_id": "1", "ingestion_ts": 100.0}]
+        current = [{"source_id": "1", "ingestion_ts": 100.0, "file_name": "f2"}]
         batch = [{"pmid": "1", "operation": "delete", "ingestion_ts": 90.0, "file_name": "f1"}]
         result = self._simulate_dbt_run(current, batch, max_ts_in_table=95.0)
         self.assertEqual(len(result), 1)
@@ -373,7 +400,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         self.assertEqual(len(result), 0)
 
     def test_watermark_boundary(self) -> None:
-        current = [{"source_id": "1", "ingestion_ts": 100.0}]
+        current = [{"source_id": "1", "ingestion_ts": 100.0, "file_name": "f0"}]
         batch = [
             {"pmid": "1", "operation": "delete", "ingestion_ts": 100.0, "file_name": "f2"},
             {"pmid": "2", "operation": "upsert", "ingestion_ts": 101.0, "file_name": "f2"},
@@ -392,7 +419,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         self.assertEqual(result[0]["file_name"], "pub24n0002")
 
     def test_large_mixed_batch(self) -> None:
-        current = [{"source_id": str(i), "ingestion_ts": 100.0} for i in range(100)]
+        current = [{"source_id": str(i), "ingestion_ts": 100.0, "file_name": "f0"} for i in range(100)]
         batch = []
         for i in range(50):
             batch.append({"pmid": str(i), "operation": "upsert", "ingestion_ts": 110.0, "file_name": "f2"})
@@ -415,7 +442,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         Multiple delete operations for the same PMID in a single batch.
         Should result in deletion (idempotent).
         """
-        current = [{"source_id": "1", "ingestion_ts": 100.0}]
+        current = [{"source_id": "1", "ingestion_ts": 100.0, "file_name": "f0"}]
         batch = [
             {"pmid": "1", "operation": "delete", "ingestion_ts": 110.0, "file_name": "f1"},
             {"pmid": "1", "operation": "delete", "ingestion_ts": 111.0, "file_name": "f2"},
@@ -428,7 +455,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         Deleting a PMID not in the current table.
         Should handle gracefully (no error, no change).
         """
-        current = [{"source_id": "1", "ingestion_ts": 100.0}]
+        current = [{"source_id": "1", "ingestion_ts": 100.0, "file_name": "f0"}]
         batch = [
             {"pmid": "99", "operation": "delete", "ingestion_ts": 110.0, "file_name": "f1"},
         ]
@@ -440,7 +467,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         """
         Verify watermark behavior with very close timestamps.
         """
-        current = [{"source_id": "1", "ingestion_ts": 100.0}]
+        current = [{"source_id": "1", "ingestion_ts": 100.0, "file_name": "f0"}]
         batch = [
             # Just barely above watermark
             {"pmid": "1", "operation": "upsert", "ingestion_ts": 100.000001, "file_name": "f1", "title": "New"},
@@ -455,7 +482,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         Wait, if watermark advances, the batch is filtered out.
         If we re-run with SAME watermark?
         """
-        current = [{"source_id": "1", "ingestion_ts": 100.0}]
+        current = [{"source_id": "1", "ingestion_ts": 100.0, "file_name": "f0"}]
         batch = [{"pmid": "1", "operation": "upsert", "ingestion_ts": 110.0, "file_name": "f1"}]
 
         # Run 1
@@ -469,6 +496,74 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         self.assertEqual(len(result2), 1)
         # State should be identical
         self.assertEqual(result2, result1)
+
+    # --- Blind Overwrite Protection Tests ---
+
+    def test_blind_overwrite_protection_older_file(self) -> None:
+        """
+        Incoming batch has newer ingestion_ts but OLDER file_name.
+        Should be ignored.
+        """
+        # Current state: Updated file (1001) ingested at ts=200
+        current = [
+            {"source_id": "1", "ingestion_ts": 200.0, "file_name": "pubmed24n1001.xml", "title": "Version 2"}
+        ]
+        # Incoming: Baseline file (0001) re-ingested at ts=300
+        batch = [
+            {
+                "pmid": "1",
+                "operation": "upsert",
+                "ingestion_ts": 300.0,
+                "file_name": "pubmed24n0001.xml",
+                "title": "Version 1 (Old)",
+            }
+        ]
+        result = self._simulate_dbt_run(current, batch, max_ts_in_table=250.0)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["title"], "Version 2")  # Should keep Version 2
+        self.assertEqual(result[0]["file_name"], "pubmed24n1001.xml")
+
+    def test_blind_overwrite_protection_newer_file(self) -> None:
+        """
+        Incoming batch has newer ingestion_ts AND NEWER file_name.
+        Should update.
+        """
+        current = [
+            {"source_id": "1", "ingestion_ts": 200.0, "file_name": "pubmed24n1001.xml", "title": "Version 2"}
+        ]
+        batch = [
+            {
+                "pmid": "1",
+                "operation": "upsert",
+                "ingestion_ts": 300.0,
+                "file_name": "pubmed24n1200.xml",
+                "title": "Version 3",
+            }
+        ]
+        result = self._simulate_dbt_run(current, batch, max_ts_in_table=250.0)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["title"], "Version 3")
+
+    def test_blind_overwrite_same_file_reingestion(self) -> None:
+        """
+        Incoming batch has SAME file_name but newer ingestion_ts.
+        Should update (correction/repair).
+        """
+        current = [
+            {"source_id": "1", "ingestion_ts": 200.0, "file_name": "pubmed24n1001.xml", "title": "Version 2 Bad"}
+        ]
+        batch = [
+            {
+                "pmid": "1",
+                "operation": "upsert",
+                "ingestion_ts": 300.0,
+                "file_name": "pubmed24n1001.xml",
+                "title": "Version 2 Fixed",
+            }
+        ]
+        result = self._simulate_dbt_run(current, batch, max_ts_in_table=250.0)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["title"], "Version 2 Fixed")
 
 
 class TestDateLogic(unittest.TestCase):
@@ -539,8 +634,7 @@ class TestDateLogic(unittest.TestCase):
         elif md:
             # Try to find month in MedlineDate if Year was found there (or even if not)
             # MedlineDate examples: "1998 Dec-1999 Jan", "Spring 2000"
-            # Logic: If we rely on MedlineDate, we usually just default to Jan unless we want to be fancy.
-            # For this iteration, let's keep it simple: If using MedlineDate, default to Jan 01
+            # Logic: If we rely on MedlineDate, we usually just default to Jan 01
             # unless we want to parse it. The requirement says "extract publication_date".
             # Standard practice: First day of the year/season.
             pass

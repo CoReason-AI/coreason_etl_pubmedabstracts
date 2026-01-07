@@ -8,32 +8,29 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
-import argparse
 import sys
-from typing import List, Optional
+from enum import Enum
+from typing import Annotated
 
 import dlt
+import typer
 from dlt.helpers.dbt import create_runner
 from dlt.sources import DltSource
 
 from coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline import pubmed_source
 from coreason_etl_pubmedabstracts.utils.logger import logger
 
+app = typer.Typer(
+    name="coreason_etl_pubmedabstracts",
+    help="Coreason ETL PubMed Abstracts Pipeline",
+    add_completion=False,
+)
 
-def get_args(args: Optional[List[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Coreason ETL PubMed Abstracts Pipeline")
-    parser.add_argument(
-        "--load",
-        choices=["baseline", "updates", "all"],
-        default="all",
-        help="Which dataset to load (default: all)",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="If set, initializes the pipeline but does not run ingestion.",
-    )
-    return parser.parse_args(args)
+
+class LoadTarget(str, Enum):
+    baseline = "baseline"
+    updates = "updates"
+    all = "all"
 
 
 def run_dbt_transformations(pipeline: dlt.Pipeline, project_dir: str = "dbt_pubmed") -> None:
@@ -103,15 +100,19 @@ def _prepare_baseline_load(pipeline: dlt.Pipeline, source: DltSource) -> None:
         logger.warning(f"State check/truncation failed: {e}. Proceeding with load.")
 
 
-def run_pipeline(load_target: str, dry_run: bool = False) -> None:
+@app.command()
+def run(
+    load: Annotated[
+        LoadTarget, typer.Option(help="Which dataset to load (default: all)")
+    ] = LoadTarget.all,
+    dry_run: Annotated[
+        bool, typer.Option(help="If set, initializes the pipeline but does not run ingestion.")
+    ] = False,
+) -> None:
     """
     Orchestrate the ETL pipeline.
-
-    Args:
-        load_target: 'baseline', 'updates', or 'all'.
-        dry_run: If True, skip actual execution.
     """
-    logger.info(f"Initializing pipeline with target: {load_target}")
+    logger.info(f"Initializing pipeline with target: {load.value}")
 
     # Initialize the dlt pipeline
     # dataset_name should match what is expected by dbt (e.g. 'pubmed')
@@ -128,9 +129,9 @@ def run_pipeline(load_target: str, dry_run: bool = False) -> None:
 
     # Determine which resources to run
     resources_to_run = []
-    if load_target in ("baseline", "all"):
+    if load in (LoadTarget.baseline, LoadTarget.all):
         resources_to_run.append("pubmed_baseline")
-    if load_target in ("updates", "all"):
+    if load in (LoadTarget.updates, LoadTarget.all):
         resources_to_run.append("pubmed_updates")
 
     if not resources_to_run:
@@ -149,27 +150,26 @@ def run_pipeline(load_target: str, dry_run: bool = False) -> None:
         _prepare_baseline_load(pipeline, source)
 
     # 3. Run the Pipeline
-    info = pipeline.run(source)
-    logger.info(f"Pipeline run completed. Load Info: {info}")
+    try:
+        info = pipeline.run(source)
+        logger.info(f"Pipeline run completed. Load Info: {info}")
 
-    # 4. Check for success (basic check)
-    if info.has_failed_jobs:
-        logger.error("Pipeline run reported failed jobs!")
+        # 4. Check for success (basic check)
+        if info.has_failed_jobs:
+            logger.error("Pipeline run reported failed jobs!")
+            sys.exit(1)
+
+        # 5. Run dbt transformations
+        # This runs regardless of load target, as updates also need transformation (Silver/Gold)
+        run_dbt_transformations(pipeline)
+    except Exception as e:
+        logger.exception(f"Pipeline execution failed: {e}")
         sys.exit(1)
-
-    # 5. Run dbt transformations
-    # This runs regardless of load target, as updates also need transformation (Silver/Gold)
-    run_dbt_transformations(pipeline)
 
 
 @logger.catch  # type: ignore
 def main() -> None:
-    args = get_args()
-    try:
-        run_pipeline(args.load, args.dry_run)
-    except Exception:
-        logger.exception("Pipeline execution failed")
-        sys.exit(1)
+    app()
 
 
 if __name__ == "__main__":  # pragma: no cover

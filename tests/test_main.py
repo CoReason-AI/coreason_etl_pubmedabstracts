@@ -11,19 +11,14 @@
 import unittest
 from unittest.mock import MagicMock, PropertyMock, patch
 
-from coreason_etl_pubmedabstracts.main import get_args, main, run_dbt_transformations, run_pipeline
+from typer.testing import CliRunner
+
+from coreason_etl_pubmedabstracts.main import LoadTarget, app, main, run_dbt_transformations
 
 
 class TestMainOrchestration(unittest.TestCase):
-    def test_get_args(self) -> None:
-        """Test argument parsing."""
-        args = get_args(["--load", "baseline"])
-        self.assertEqual(args.load, "baseline")
-        self.assertFalse(args.dry_run)
-
-        args = get_args(["--dry-run"])
-        self.assertEqual(args.load, "all")
-        self.assertTrue(args.dry_run)
+    def setUp(self) -> None:
+        self.runner = CliRunner()
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
@@ -34,7 +29,7 @@ class TestMainOrchestration(unittest.TestCase):
         mock_source_func: MagicMock,
         mock_pipeline: MagicMock,
     ) -> None:
-        """Test running all resources triggers dbt."""
+        """Test running all resources triggers dbt via Typer command."""
         # Setup mock pipeline
         mock_p_instance = MagicMock()
         mock_pipeline.return_value = mock_p_instance
@@ -50,8 +45,9 @@ class TestMainOrchestration(unittest.TestCase):
         mock_filtered_source = MagicMock()
         mock_source_obj.with_resources.return_value = mock_filtered_source
 
-        # Execute
-        run_pipeline("all")
+        # Execute via Typer Runner
+        result = self.runner.invoke(app, ["--load", "all"])
+        self.assertEqual(result.exit_code, 0)
 
         # Verify pipeline init
         mock_pipeline.assert_called_once_with(
@@ -91,7 +87,8 @@ class TestMainOrchestration(unittest.TestCase):
         mock_filtered_source = MagicMock()
         mock_source_obj.with_resources.return_value = mock_filtered_source
 
-        run_pipeline("updates")
+        result = self.runner.invoke(app, ["--load", "updates"])
+        self.assertEqual(result.exit_code, 0)
 
         # Verify source.with_resources called
         mock_source_obj.with_resources.assert_called_once_with("pubmed_updates")
@@ -106,21 +103,20 @@ class TestMainOrchestration(unittest.TestCase):
     @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
     def test_dry_run(self, mock_dbt: MagicMock, mock_pipeline: MagicMock) -> None:
         """Test dry run skips execution."""
-        run_pipeline("all", dry_run=True)
+        result = self.runner.invoke(app, ["--dry-run"])
+        self.assertEqual(result.exit_code, 0)
 
         mock_pipeline.assert_called_once()
         mock_pipeline.return_value.run.assert_not_called()
         mock_dbt.assert_not_called()
 
     @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.sys.exit")
     @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
     @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
     def test_failed_jobs_exit(
         self,
         mock_dbt: MagicMock,
         mock_source: MagicMock,
-        mock_exit: MagicMock,
         mock_pipeline: MagicMock,
     ) -> None:
         """Test that failed jobs trigger sys.exit(1)."""
@@ -131,43 +127,15 @@ class TestMainOrchestration(unittest.TestCase):
         mock_info.has_failed_jobs = True
         mock_p_instance.run.return_value = mock_info
 
-        run_pipeline("all")
+        result = self.runner.invoke(app, ["--load", "all"])
+        # Typer catches sys.exit(1) and sets exit_code to 1
+        self.assertEqual(result.exit_code, 1)
 
-        mock_exit.assert_called_once_with(1)
-
-    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    def test_run_pipeline_no_resources(self, mock_pipeline: MagicMock) -> None:
-        """Test run_pipeline with invalid or empty target triggers warning and return."""
-        mock_p_instance = MagicMock()
-        mock_pipeline.return_value = mock_p_instance
-
-        # 'none' or any string not in logic will result in empty resources list
-        run_pipeline("invalid_target")
-
-        # Should not run
-        mock_p_instance.run.assert_not_called()
-
-    @patch("coreason_etl_pubmedabstracts.main.get_args")
-    @patch("coreason_etl_pubmedabstracts.main.run_pipeline")
-    def test_main_success(self, mock_run: MagicMock, mock_args: MagicMock) -> None:
-        """Test main() success path."""
-        mock_args.return_value.load = "all"
-        mock_args.return_value.dry_run = False
-
+    @patch("coreason_etl_pubmedabstracts.main.app")
+    def test_main_entrypoint(self, mock_app: MagicMock) -> None:
+        """Test main() calls app()."""
         main()
-
-        mock_run.assert_called_once_with("all", False)
-
-    @patch("coreason_etl_pubmedabstracts.main.get_args")
-    @patch("coreason_etl_pubmedabstracts.main.run_pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.sys.exit")
-    def test_main_exception(self, mock_exit: MagicMock, mock_run: MagicMock, mock_args: MagicMock) -> None:
-        """Test main() exception handling."""
-        mock_run.side_effect = Exception("Boom")
-
-        main()
-
-        mock_exit.assert_called_once_with(1)
+        mock_app.assert_called_once()
 
     @patch("coreason_etl_pubmedabstracts.main.create_runner")
     def test_run_dbt_transformations_success(self, mock_create_runner: MagicMock) -> None:
@@ -242,7 +210,7 @@ class TestMainOrchestration(unittest.TestCase):
         mock_filtered = MagicMock()
         mock_source_obj.with_resources.return_value = mock_filtered
 
-        run_pipeline("baseline")
+        self.runner.invoke(app, ["--load", "baseline"])
 
         # Verify TRUNCATE called
         mock_client.execute_sql.assert_called_with("TRUNCATE TABLE test_ds.bronze_pubmed_baseline")
@@ -287,7 +255,7 @@ class TestMainOrchestration(unittest.TestCase):
         mock_filtered.name = "pubmed_source"
         mock_source_obj.with_resources.return_value = mock_filtered
 
-        run_pipeline("baseline")
+        self.runner.invoke(app, ["--load", "baseline"])
 
         # Verify TRUNCATE NOT called
         mock_client.execute_sql.assert_not_called()
@@ -327,8 +295,9 @@ class TestMainOrchestration(unittest.TestCase):
         mock_filtered.name = "pubmed_source"
         mock_source_obj.with_resources.return_value = mock_filtered
 
-        # Should not raise
-        run_pipeline("baseline")
+        # Should not raise (log only)
+        result = self.runner.invoke(app, ["--load", "baseline"])
+        self.assertEqual(result.exit_code, 0)
 
         # Verify attempt
         mock_client.execute_sql.assert_called()
@@ -361,7 +330,8 @@ class TestMainOrchestration(unittest.TestCase):
         mock_filtered.name = "pubmed_source"
         mock_source_obj.with_resources.return_value = mock_filtered
 
-        run_pipeline("baseline")
+        result = self.runner.invoke(app, ["--load", "baseline"])
+        self.assertEqual(result.exit_code, 0)
 
         # Should not crash
         mock_p_instance.run.assert_called()
