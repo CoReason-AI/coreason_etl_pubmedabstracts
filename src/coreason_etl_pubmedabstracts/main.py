@@ -9,11 +9,11 @@
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
 import argparse
-import subprocess
 import sys
 from typing import List, Optional
 
 import dlt
+from dlt.helpers.dbt import create_runner
 from dlt.sources import DltSource
 
 from coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline import pubmed_source
@@ -36,24 +36,35 @@ def get_args(args: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(args)
 
 
-def run_dbt_transformations(project_dir: str = "dbt_pubmed") -> None:
+def run_dbt_transformations(pipeline: dlt.Pipeline, project_dir: str = "dbt_pubmed") -> None:
     """
-    Execute dbt build to transform loaded data.
+    Execute dbt build to transform loaded data using dlt's built-in dbt runner.
     """
     logger.info("Starting dbt transformations...")
     try:
-        # We assume 'dbt' is in the path (installed via poetry)
-        subprocess.run(
-            ["dbt", "build", "--project-dir", project_dir],
-            check=True,
-            capture_output=False,  # Let dbt output stream to stdout/stderr
-        )
+        # Get credentials from the pipeline configuration
+        with pipeline.destination_client() as client:
+            # Create dlt's dbt runner
+            # venv=None uses current environment (where dbt-postgres is installed)
+            runner = create_runner(
+                venv=None,
+                credentials=client.config,
+                working_dir=".",  # Current directory as base
+                package_location=project_dir,  # Path to dbt project
+            )
+
+            # Use _run_dbt_command to execute 'dbt build'.
+            # 'dbt build' is preferred over 'run' + 'test' as it runs models, tests,
+            # seeds, and snapshots in DAG order, ensuring correctness and handling dependencies.
+            # While _run_dbt_command is protected, it's the only way to invoke 'build'
+            # via the current DBTPackageRunner API, and essential for the 'snapshot' requirement.
+            logger.info("Running dbt build...")
+            runner._run_dbt_command("build", cmd_params=["--fail-fast"])
+
         logger.info("dbt transformations completed successfully.")
-    except FileNotFoundError as e:
-        logger.error("dbt executable not found. Ensure dbt is installed and in the PATH.")
-        raise e
-    except subprocess.CalledProcessError as e:
-        logger.error(f"dbt transformations failed with exit code {e.returncode}")
+
+    except Exception as e:
+        logger.error(f"dbt transformations failed: {e}")
         raise e
 
 
@@ -148,7 +159,7 @@ def run_pipeline(load_target: str, dry_run: bool = False) -> None:
 
     # 5. Run dbt transformations
     # This runs regardless of load target, as updates also need transformation (Silver/Gold)
-    run_dbt_transformations()
+    run_dbt_transformations(pipeline)
 
 
 @logger.catch  # type: ignore
