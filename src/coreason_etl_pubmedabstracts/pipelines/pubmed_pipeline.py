@@ -50,17 +50,7 @@ def pubmed_xml_parser(file_items: List[FileItem]) -> Iterator[Dict[str, Any]]:
         file_name = file_item["file_name"]
         logger.info(f"Processing file: {file_name}")
 
-        # Open the file using the helper method provided by FileItem
-        # This handles the fsspec integration and compression
-        # We need to use 'open' method of the item or the fs_client.
-        # FileItem is a dict-like object with an 'open' method?
-        # Checking dlt docs/source: FileItemDict has a .open() method?
-        # Actually dlt source code: file_dict = FileItemDict(file_model, fs_client)
-        # FileItemDict implementation likely has open().
-
         try:
-            # We can use the 'open' method on the file_item if available,
-            # or use the fs_client inside it if exposed.
             # dlt's FileItemDict has a .open() method that returns a file-like object.
             # It wraps fs_client.open(...)
             with file_item.open() as f:
@@ -71,59 +61,34 @@ def pubmed_xml_parser(file_items: List[FileItem]) -> Iterator[Dict[str, Any]]:
             raise e
 
 
+def _create_pubmed_resource(base_url: str, subfolder: str, resource_name: str) -> DltResource:
+    """
+    Helper to create a dlt resource for a specific PubMed subfolder (baseline or updates).
+    """
+    # Ensure base_url ends with / and subfolder does not start with / to avoid double slashes
+    full_url = base_url.rstrip("/") + "/" + subfolder.strip("/") + "/"
+
+    return (
+        filesystem(
+            bucket_url=full_url,
+            file_glob="*.xml.gz",
+            incremental=dlt.sources.incremental("file_name"),  # noqa: B008
+        )
+        | pubmed_xml_parser
+    ).with_name(resource_name)
+
+
 @dlt.source  # type: ignore[misc]
 def pubmed_source() -> Iterator[DltResource]:
     """
     The main DLT source for PubMed using native filesystem logic.
     """
-
-    # We define the incremental config for file_name
-    # dlt filesystem source uses 'file_name' field in FileItem.
-
-    # Resource: Baseline
     # We rely on dlt config (secrets.toml) to provide bucket_url.
     # [sources.pubmed.filesystem] -> bucket_url is the base.
-    # But here we need specific subdirectories.
-    # We can override bucket_url in the call.
-
-    # We'll use dlt.config.value to get the base url if we wanted, but we can also just rely on
-    # specific structure.
-    # To keep it standard, we'll assume the user configures the base url in secrets,
-    # and we append the path. But filesystem source takes a full bucket_url.
-
-    # Let's check if we can retrieve the configured base url.
-    # Or we can just use the provided default in the function signature if we kept it.
-    # But we want to use dlt config.
-
-    # Better approach: Define two resources using filesystem factory.
-
-    # We need to construct the URL. We can ask dlt to inject the base URL.
-    # But filesystem() expects bucket_url as an argument.
-
-    # Let's use dlt.config to get the base URL.
-    # We assume [sources.pubmed] section exists.
-
     base_url = dlt.config.get("sources.pubmed.filesystem.bucket_url", "ftp://ftp.ncbi.nlm.nih.gov/pubmed/")
 
-    # Ensure base_url ends with /
-    base_url = base_url.rstrip("/") + "/"
-
     # 1. Baseline
-    yield (
-        filesystem(
-            bucket_url=base_url + "baseline/",
-            file_glob="*.xml.gz",
-            incremental=dlt.sources.incremental("file_name"),
-        )
-        | pubmed_xml_parser
-    ).with_name("pubmed_baseline")
+    yield _create_pubmed_resource(base_url, "baseline", "pubmed_baseline")
 
     # 2. Updates
-    yield (
-        filesystem(
-            bucket_url=base_url + "updatefiles/",
-            file_glob="*.xml.gz",
-            incremental=dlt.sources.incremental("file_name"),
-        )
-        | pubmed_xml_parser
-    ).with_name("pubmed_updates")
+    yield _create_pubmed_resource(base_url, "updatefiles", "pubmed_updates")
