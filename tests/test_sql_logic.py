@@ -506,9 +506,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         Should be ignored.
         """
         # Current state: Updated file (1001) ingested at ts=200
-        current = [
-            {"source_id": "1", "ingestion_ts": 200.0, "file_name": "pubmed24n1001.xml", "title": "Version 2"}
-        ]
+        current = [{"source_id": "1", "ingestion_ts": 200.0, "file_name": "pubmed24n1001.xml", "title": "Version 2"}]
         # Incoming: Baseline file (0001) re-ingested at ts=300
         batch = [
             {
@@ -529,9 +527,7 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         Incoming batch has newer ingestion_ts AND NEWER file_name.
         Should update.
         """
-        current = [
-            {"source_id": "1", "ingestion_ts": 200.0, "file_name": "pubmed24n1001.xml", "title": "Version 2"}
-        ]
+        current = [{"source_id": "1", "ingestion_ts": 200.0, "file_name": "pubmed24n1001.xml", "title": "Version 2"}]
         batch = [
             {
                 "pmid": "1",
