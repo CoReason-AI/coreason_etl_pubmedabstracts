@@ -100,11 +100,9 @@ def _prepare_baseline_load(pipeline: dlt.Pipeline, source: DltSource) -> None:
         logger.warning(f"State check/truncation failed: {e}. Proceeding with load.")
 
 
-@app.command()
+@app.command()  # type: ignore[misc]
 def run(
-    load: Annotated[
-        LoadTarget, typer.Option(help="Which dataset to load (default: all)")
-    ] = LoadTarget.all,
+    load: Annotated[LoadTarget, typer.Option(help="Which dataset to load (default: all)")] = LoadTarget.all,
     dry_run: Annotated[
         bool, typer.Option(help="If set, initializes the pipeline but does not run ingestion.")
     ] = False,

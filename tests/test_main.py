@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 from typer.testing import CliRunner
 
-from coreason_etl_pubmedabstracts.main import LoadTarget, app, main, run_dbt_transformations
+from coreason_etl_pubmedabstracts.main import app, main, run_dbt_transformations
 
 
 class TestMainOrchestration(unittest.TestCase):
@@ -46,7 +46,7 @@ class TestMainOrchestration(unittest.TestCase):
         mock_source_obj.with_resources.return_value = mock_filtered_source
 
         # Execute via Typer Runner
-        result = self.runner.invoke(app, ["--load", "all"])
+        result = self.runner.invoke(app, ["run", "--load", "all"])
         self.assertEqual(result.exit_code, 0)
 
         # Verify pipeline init
@@ -87,7 +87,7 @@ class TestMainOrchestration(unittest.TestCase):
         mock_filtered_source = MagicMock()
         mock_source_obj.with_resources.return_value = mock_filtered_source
 
-        result = self.runner.invoke(app, ["--load", "updates"])
+        result = self.runner.invoke(app, ["run", "--load", "updates"])
         self.assertEqual(result.exit_code, 0)
 
         # Verify source.with_resources called
@@ -103,7 +103,7 @@ class TestMainOrchestration(unittest.TestCase):
     @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
     def test_dry_run(self, mock_dbt: MagicMock, mock_pipeline: MagicMock) -> None:
         """Test dry run skips execution."""
-        result = self.runner.invoke(app, ["--dry-run"])
+        result = self.runner.invoke(app, ["run", "--dry-run"])
         self.assertEqual(result.exit_code, 0)
 
         mock_pipeline.assert_called_once()
@@ -127,7 +127,7 @@ class TestMainOrchestration(unittest.TestCase):
         mock_info.has_failed_jobs = True
         mock_p_instance.run.return_value = mock_info
 
-        result = self.runner.invoke(app, ["--load", "all"])
+        result = self.runner.invoke(app, ["run", "--load", "all"])
         # Typer catches sys.exit(1) and sets exit_code to 1
         self.assertEqual(result.exit_code, 1)
 

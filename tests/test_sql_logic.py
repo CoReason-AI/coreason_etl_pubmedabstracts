@@ -271,7 +271,8 @@ class TestPhysicalHardDeleteLogic(unittest.TestCase):
         3. Merge logic:
            - If ID exists in current table:
              - Check if Batch Winner is 'better' than Current Record.
-             - Better = (Batch.file_name > Current.file_name) OR (Batch.file_name == Current.file_name AND Batch.ts > Current.ts)
+             - Better = (Batch.file_name > Current.file_name) OR
+                        (Batch.file_name == Current.file_name AND Batch.ts > Current.ts)
            - Else: Insert.
         """
         pre_hook_watermark = max_ts_in_table
