@@ -221,6 +221,7 @@ def test_script_entry_point_exception() -> None:
 
 # --- Coverage gap filling tests ---
 
+
 @patch("coreason_etl_pubmedabstracts.main.create_runner")
 def test_run_dbt_transformations_failure(mock_create_runner: MagicMock) -> None:
     """Test run_dbt_transformations raises exception on failure."""
