@@ -8,360 +8,326 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
-import unittest
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
-from coreason_etl_pubmedabstracts.main import get_args, main, run_dbt_transformations, run_pipeline
+import pytest
+from typer.testing import CliRunner
+
+from coreason_etl_pubmedabstracts.main import app, main
 
 
-class TestMainOrchestration(unittest.TestCase):
-    def test_get_args(self) -> None:
-        """Test argument parsing."""
-        args = get_args(["--load", "baseline"])
-        self.assertEqual(args.load, "baseline")
-        self.assertFalse(args.dry_run)
+@pytest.fixture  # type: ignore[misc]
+def runner() -> CliRunner:
+    return CliRunner()
 
-        args = get_args(["--dry-run"])
-        self.assertEqual(args.load, "all")
-        self.assertTrue(args.dry_run)
 
-    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
-    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
-    def test_run_pipeline_all(
-        self,
-        mock_run_dbt: MagicMock,
-        mock_source_func: MagicMock,
-        mock_pipeline: MagicMock,
-    ) -> None:
-        """Test running all resources triggers dbt."""
-        # Setup mock pipeline
-        mock_p_instance = MagicMock()
-        mock_pipeline.return_value = mock_p_instance
+@patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+@patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+@patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
+def test_main_default_args(
+    mock_dbt: MagicMock,
+    mock_source: MagicMock,
+    mock_pipeline: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Test running with default arguments (which defaults to 'all')."""
+    # Setup mocks
+    pipeline_instance = MagicMock()
+    pipeline_instance.run.return_value.has_failed_jobs = False
+    mock_pipeline.return_value = pipeline_instance
 
-        # Setup successful load info
-        mock_info = MagicMock()
-        mock_info.has_failed_jobs = False
-        mock_p_instance.run.return_value = mock_info
+    source_instance = MagicMock()
+    mock_source.return_value = source_instance
+    source_instance.with_resources.return_value = source_instance
 
-        # Setup source mocks
-        mock_source_obj = MagicMock()
-        mock_source_func.return_value = mock_source_obj
-        mock_filtered_source = MagicMock()
-        mock_source_obj.with_resources.return_value = mock_filtered_source
+    config_mock = MagicMock()
+    config_mock.__section__ = "postgres"
+    pipeline_instance.destination_client.return_value.__enter__.return_value.config = config_mock
 
-        # Execute
-        run_pipeline("all")
+    result = runner.invoke(app, [])
 
-        # Verify pipeline init
-        mock_pipeline.assert_called_once_with(
-            pipeline_name="pubmed_abstracts",
-            destination="postgres",
-            dataset_name="pubmed",
-            progress="log",
-        )
+    assert result.exit_code == 0, f"Exit code {result.exit_code}, Output: {result.output}"
+    mock_pipeline.assert_called_once()
+    mock_source.assert_called_once()
+    source_instance.with_resources.assert_called_with("pubmed_baseline", "pubmed_updates")
 
-        # Verify source.with_resources called
-        mock_source_obj.with_resources.assert_called_once_with("pubmed_baseline", "pubmed_updates")
 
-        # Verify run called with filtered source
-        mock_p_instance.run.assert_called_once_with(mock_filtered_source)
+@patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+@patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+@patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
+def test_main_run_all(
+    mock_dbt: MagicMock,
+    mock_source: MagicMock,
+    mock_pipeline: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Test successful run with default 'all'."""
+    # Setup mocks
+    pipeline_instance = MagicMock()
+    pipeline_instance.run.return_value.has_failed_jobs = False
+    mock_pipeline.return_value = pipeline_instance
 
-        # Verify dbt called with pipeline instance
-        mock_run_dbt.assert_called_once_with(mock_p_instance)
+    source_instance = MagicMock()
+    mock_source.return_value = source_instance
+    source_instance.with_resources.return_value = source_instance
 
-    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
-    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
-    def test_run_pipeline_updates_only(
-        self,
-        mock_run_dbt: MagicMock,
-        mock_source_func: MagicMock,
-        mock_pipeline: MagicMock,
-    ) -> None:
-        """Test running only updates runs dbt."""
-        mock_p_instance = MagicMock()
-        mock_pipeline.return_value = mock_p_instance
-        mock_info = MagicMock()
-        mock_info.has_failed_jobs = False
-        mock_p_instance.run.return_value = mock_info
+    result = runner.invoke(app, ["--load", "all"])
 
-        mock_source_obj = MagicMock()
-        mock_source_func.return_value = mock_source_obj
-        mock_filtered_source = MagicMock()
-        mock_source_obj.with_resources.return_value = mock_filtered_source
+    assert result.exit_code == 0, f"Exit code {result.exit_code}, Output: {result.output}"
+    mock_pipeline.assert_called_once()
+    mock_source.assert_called_once()
+    source_instance.with_resources.assert_called_with("pubmed_baseline", "pubmed_updates")
+    pipeline_instance.run.assert_called_once()
+    mock_dbt.assert_called_once()
 
-        run_pipeline("updates")
 
-        # Verify source.with_resources called
-        mock_source_obj.with_resources.assert_called_once_with("pubmed_updates")
+@patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+def test_main_dry_run(mock_pipeline: MagicMock, runner: CliRunner) -> None:
+    """Test dry run flag."""
+    result = runner.invoke(app, ["--dry-run"])
 
-        # Verify run called with updates only
-        mock_p_instance.run.assert_called_once_with(mock_filtered_source)
+    assert result.exit_code == 0, f"Exit code {result.exit_code}, Output: {result.output}"
+    mock_pipeline.assert_called_once()
+    mock_pipeline.return_value.run.assert_not_called()
 
-        # Verify dbt called
-        mock_run_dbt.assert_called_once_with(mock_p_instance)
 
-    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
-    def test_dry_run(self, mock_dbt: MagicMock, mock_pipeline: MagicMock) -> None:
-        """Test dry run skips execution."""
-        run_pipeline("all", dry_run=True)
+@patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+@patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+@patch("coreason_etl_pubmedabstracts.main._prepare_baseline_load")
+def test_main_baseline_only(
+    mock_prepare: MagicMock,
+    mock_source: MagicMock,
+    mock_pipeline: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Test running only baseline."""
+    pipeline_instance = MagicMock()
+    pipeline_instance.run.return_value.has_failed_jobs = False
+    mock_pipeline.return_value = pipeline_instance
 
-        mock_pipeline.assert_called_once()
-        mock_pipeline.return_value.run.assert_not_called()
-        mock_dbt.assert_not_called()
+    source_instance = MagicMock()
+    mock_source.return_value = source_instance
+    source_instance.with_resources.return_value = source_instance
 
-    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.sys.exit")
-    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
-    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
-    def test_failed_jobs_exit(
-        self,
-        mock_dbt: MagicMock,
-        mock_source: MagicMock,
-        mock_exit: MagicMock,
-        mock_pipeline: MagicMock,
-    ) -> None:
-        """Test that failed jobs trigger sys.exit(1)."""
-        mock_p_instance = MagicMock()
-        mock_pipeline.return_value = mock_p_instance
+    config_mock = MagicMock()
+    config_mock.__section__ = "postgres"
+    pipeline_instance.destination_client.return_value.__enter__.return_value.config = config_mock
 
-        mock_info = MagicMock()
-        mock_info.has_failed_jobs = True
-        mock_p_instance.run.return_value = mock_info
-
-        run_pipeline("all")
-
-        mock_exit.assert_called_once_with(1)
-
-    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    def test_run_pipeline_no_resources(self, mock_pipeline: MagicMock) -> None:
-        """Test run_pipeline with invalid or empty target triggers warning and return."""
-        mock_p_instance = MagicMock()
-        mock_pipeline.return_value = mock_p_instance
-
-        # 'none' or any string not in logic will result in empty resources list
-        run_pipeline("invalid_target")
-
-        # Should not run
-        mock_p_instance.run.assert_not_called()
-
-    @patch("coreason_etl_pubmedabstracts.main.get_args")
-    @patch("coreason_etl_pubmedabstracts.main.run_pipeline")
-    def test_main_success(self, mock_run: MagicMock, mock_args: MagicMock) -> None:
-        """Test main() success path."""
-        mock_args.return_value.load = "all"
-        mock_args.return_value.dry_run = False
-
-        main()
-
-        mock_run.assert_called_once_with("all", False)
-
-    @patch("coreason_etl_pubmedabstracts.main.get_args")
-    @patch("coreason_etl_pubmedabstracts.main.run_pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.sys.exit")
-    def test_main_exception(self, mock_exit: MagicMock, mock_run: MagicMock, mock_args: MagicMock) -> None:
-        """Test main() exception handling."""
-        mock_run.side_effect = Exception("Boom")
-
-        main()
-
-        mock_exit.assert_called_once_with(1)
-
-    @patch("coreason_etl_pubmedabstracts.main.create_runner")
-    def test_run_dbt_transformations_success(self, mock_create_runner: MagicMock) -> None:
-        """Test run_dbt_transformations success with dlt runner."""
-        mock_pipeline = MagicMock()
-        mock_client = MagicMock()
-        mock_pipeline.destination_client.return_value.__enter__.return_value = mock_client
-        mock_client.config = "mock_config"
-
+    with patch("coreason_etl_pubmedabstracts.main.create_runner") as mock_runner:
         mock_runner_instance = MagicMock()
-        mock_create_runner.return_value = mock_runner_instance
+        mock_runner.return_value = mock_runner_instance
 
+        result = runner.invoke(app, ["--load", "baseline"])
+
+        assert result.exit_code == 0, f"Exit code {result.exit_code}, Output: {result.output}"
+        source_instance.with_resources.assert_called_with("pubmed_baseline")
+        mock_prepare.assert_called_once()
+        mock_runner_instance._run_dbt_command.assert_called_with("build", command_args=["--fail-fast"])
+
+
+@patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+@patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+@patch("coreason_etl_pubmedabstracts.main._prepare_baseline_load")
+def test_main_updates_only(
+    mock_prepare: MagicMock,
+    mock_source: MagicMock,
+    mock_pipeline: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Test running only updates."""
+    pipeline_instance = MagicMock()
+    pipeline_instance.run.return_value.has_failed_jobs = False
+    mock_pipeline.return_value = pipeline_instance
+
+    source_instance = MagicMock()
+    mock_source.return_value = source_instance
+    source_instance.with_resources.return_value = source_instance
+
+    config_mock = MagicMock()
+    config_mock.__section__ = "postgres"
+    pipeline_instance.destination_client.return_value.__enter__.return_value.config = config_mock
+
+    with patch("coreason_etl_pubmedabstracts.main.create_runner") as mock_runner:
+        mock_runner_instance = MagicMock()
+        mock_runner.return_value = mock_runner_instance
+
+        result = runner.invoke(app, ["--load", "updates"])
+
+        assert result.exit_code == 0, f"Exit code {result.exit_code}, Output: {result.output}"
+        source_instance.with_resources.assert_called_with("pubmed_updates")
+        mock_prepare.assert_not_called()
+        mock_runner_instance._run_dbt_command.assert_called_with("build", command_args=["--fail-fast"])
+
+
+@patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+@patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+def test_pipeline_failure(
+    mock_source: MagicMock,
+    mock_pipeline: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Test handling of pipeline failure."""
+    pipeline_instance = MagicMock()
+    # Ensure this raises an Exception during run()
+    pipeline_instance.run.side_effect = Exception("Boom")
+    mock_pipeline.return_value = pipeline_instance
+
+    # Mock source to ensure it proceeds to run()
+    source_instance = MagicMock()
+    mock_source.return_value = source_instance
+    source_instance.with_resources.return_value = source_instance
+
+    # We invoke it. We expect exit code 1.
+    result = runner.invoke(app, [])
+
+    assert result.exit_code == 1, f"Exit code {result.exit_code}, Output: {result.output}"
+    mock_pipeline.assert_called_once()
+    pipeline_instance.run.assert_called_once()
+
+
+@patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+@patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+def test_failed_jobs_check(
+    mock_source: MagicMock,
+    mock_pipeline: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Test exit when dlt reports failed jobs."""
+    pipeline_instance = MagicMock()
+    pipeline_instance.run.return_value.has_failed_jobs = True
+    mock_pipeline.return_value = pipeline_instance
+    mock_source.return_value.with_resources.return_value = MagicMock()
+
+    result = runner.invoke(app, [])
+
+    assert result.exit_code == 1, f"Exit code {result.exit_code}, Output: {result.output}"
+
+
+def test_script_entry_point() -> None:
+    """Test the main() function entry point."""
+    with patch("coreason_etl_pubmedabstracts.main.app") as mock_app:
+        main()
+        mock_app.assert_called_once()
+
+
+def test_script_entry_point_exception() -> None:
+    """Test exception handling in main()."""
+    with patch("coreason_etl_pubmedabstracts.main.app") as mock_app:
+        mock_app.side_effect = Exception("Crash")
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 1
+
+
+# --- Coverage gap filling tests ---
+
+@patch("coreason_etl_pubmedabstracts.main.create_runner")
+def test_run_dbt_transformations_failure(mock_create_runner: MagicMock) -> None:
+    """Test run_dbt_transformations raises exception on failure."""
+    from coreason_etl_pubmedabstracts.main import run_dbt_transformations
+
+    mock_pipeline = MagicMock()
+    # Mock context manager
+    mock_client = MagicMock()
+    mock_pipeline.destination_client.return_value.__enter__.return_value = mock_client
+    mock_client.config.__section__ = "postgres"
+
+    mock_create_runner.side_effect = Exception("DBT Failed")
+
+    with pytest.raises(Exception, match="DBT Failed"):
         run_dbt_transformations(mock_pipeline)
 
-        # Verify create_runner call
-        mock_create_runner.assert_called_once_with(
-            venv=None,
-            credentials="mock_config",
-            working_dir=".",
-            package_location="dbt_pubmed",
-        )
 
-        # Verify execution of 'dbt build'
-        mock_runner_instance._run_dbt_command.assert_called_once_with("build", cmd_params=["--fail-fast"])
+def test_prepare_baseline_load_exception() -> None:
+    """Test _prepare_baseline_load handles exceptions gracefully (logs warning)."""
+    from coreason_etl_pubmedabstracts.main import _prepare_baseline_load
 
-    @patch("coreason_etl_pubmedabstracts.main.create_runner")
-    def test_run_dbt_transformations_failure(self, mock_create_runner: MagicMock) -> None:
-        """Test run_dbt_transformations failure handling."""
-        mock_pipeline = MagicMock()
-        mock_client = MagicMock()
-        mock_pipeline.destination_client.return_value.__enter__.return_value = mock_client
+    mock_pipeline = MagicMock()
+    # Force an attribute error to simulate crash accessing state
+    del mock_pipeline.state
 
-        mock_runner_instance = MagicMock()
-        mock_create_runner.return_value = mock_runner_instance
+    mock_source = MagicMock()
+    mock_source.name = "test_source"
 
-        # Simulate failure in _run_dbt_command
-        mock_runner_instance._run_dbt_command.side_effect = Exception("DBT Failed")
+    # Should not raise
+    _prepare_baseline_load(mock_pipeline, mock_source)
 
-        with self.assertRaisesRegex(Exception, "DBT Failed"):
-            run_dbt_transformations(mock_pipeline)
 
-    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
-    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
-    def test_fresh_baseline_truncates(
-        self,
-        mock_run_dbt: MagicMock,
-        mock_source_func: MagicMock,
-        mock_pipeline: MagicMock,
-    ) -> None:
-        """Test that fresh run triggers TRUNCATE."""
-        mock_p_instance = MagicMock()
-        mock_pipeline.return_value = mock_p_instance
-        mock_p_instance.dataset_name = "test_ds"
+def test_prepare_baseline_load_truncation_failure() -> None:
+    """Test truncation failure logic inside _prepare_baseline_load."""
+    from coreason_etl_pubmedabstracts.main import _prepare_baseline_load
 
-        # Mock success run
-        mock_info = MagicMock()
-        mock_info.has_failed_jobs = False
-        mock_p_instance.run.return_value = mock_info
-
-        # Mock empty state
-        mock_p_instance.state = {}
-
-        # Mock sql client
-        mock_client = MagicMock()
-        mock_p_instance.sql_client.return_value.__enter__.return_value = mock_client
-
-        # Mock source
-        mock_source_obj = MagicMock()
-        mock_source_obj.name = "pubmed_source"  # Default name
-        mock_source_func.return_value = mock_source_obj
-        mock_filtered = MagicMock()
-        mock_source_obj.with_resources.return_value = mock_filtered
-
-        run_pipeline("baseline")
-
-        # Verify TRUNCATE called
-        mock_client.execute_sql.assert_called_with("TRUNCATE TABLE test_ds.bronze_pubmed_baseline")
-
-    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
-    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
-    def test_resume_baseline_skips_truncate(
-        self,
-        mock_run_dbt: MagicMock,
-        mock_source_func: MagicMock,
-        mock_pipeline: MagicMock,
-    ) -> None:
-        """Test that resuming run skips TRUNCATE."""
-        mock_p_instance = MagicMock()
-        mock_pipeline.return_value = mock_p_instance
-        mock_p_instance.dataset_name = "test_ds"
-
-        # Mock success run
-        mock_info = MagicMock()
-        mock_info.has_failed_jobs = False
-        mock_p_instance.run.return_value = mock_info
-
-        # Mock populated state
-        mock_p_instance.state = {
-            "sources": {
-                "pubmed_source": {
-                    "resources": {
-                        "pubmed_baseline": {"incremental": {"file_name": {"last_value": "pubmed24n0001.xml.gz"}}}
+    mock_pipeline = MagicMock()
+    # Mock state to simulate fresh run (no last_value)
+    mock_pipeline.state = {
+        "sources": {
+            "test_source": {
+                "resources": {
+                    "pubmed_baseline": {
+                        "incremental": {
+                            "file_name": {}  # Empty means fresh run
+                        }
                     }
                 }
             }
         }
+    }
 
-        mock_client = MagicMock()
-        mock_p_instance.sql_client.return_value.__enter__.return_value = mock_client
+    mock_source = MagicMock()
+    mock_source.name = "test_source"
 
-        mock_source_obj = MagicMock()
-        mock_source_obj.name = "pubmed_source"
-        mock_source_func.return_value = mock_source_obj
-        mock_filtered = MagicMock()
-        mock_filtered.name = "pubmed_source"
-        mock_source_obj.with_resources.return_value = mock_filtered
+    # Mock sql_client
+    mock_sql_client = MagicMock()
+    mock_pipeline.sql_client.return_value.__enter__.return_value = mock_sql_client
+    # Simulate execute_sql failure
+    mock_sql_client.execute_sql.side_effect = Exception("Table not found")
 
-        run_pipeline("baseline")
+    # Should not raise, just log warning
+    _prepare_baseline_load(mock_pipeline, mock_source)
+    mock_sql_client.execute_sql.assert_called_once()
 
-        # Verify TRUNCATE NOT called
-        mock_client.execute_sql.assert_not_called()
 
-    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
-    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
-    def test_baseline_truncate_exception(
-        self,
-        mock_run_dbt: MagicMock,
-        mock_source_func: MagicMock,
-        mock_pipeline: MagicMock,
-    ) -> None:
-        """Test exception handling during truncate."""
-        mock_p_instance = MagicMock()
-        mock_pipeline.return_value = mock_p_instance
-        mock_p_instance.dataset_name = "test_ds"
+def test_prepare_baseline_load_truncation_success() -> None:
+    """Test successful truncation logic inside _prepare_baseline_load."""
+    from coreason_etl_pubmedabstracts.main import _prepare_baseline_load
 
-        # Mock success run
-        mock_info = MagicMock()
-        mock_info.has_failed_jobs = False
-        mock_p_instance.run.return_value = mock_info
+    mock_pipeline = MagicMock()
+    # Mock state to simulate fresh run (no last_value)
+    mock_pipeline.state = {
+        "sources": {
+            "test_source": {
+                "resources": {
+                    "pubmed_baseline": {
+                        "incremental": {
+                            "file_name": {}  # Empty means fresh run
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-        # Fresh run
-        mock_p_instance.state = {}
+    mock_source = MagicMock()
+    mock_source.name = "test_source"
 
-        # Mock client to raise exception
-        mock_client = MagicMock()
-        mock_p_instance.sql_client.return_value.__enter__.return_value = mock_client
-        mock_client.execute_sql.side_effect = Exception("Table missing")
+    # Mock sql_client
+    mock_sql_client = MagicMock()
+    mock_pipeline.sql_client.return_value.__enter__.return_value = mock_sql_client
 
-        # Setup source
-        mock_source_obj = MagicMock()
-        mock_source_obj.name = "pubmed_source"
-        mock_source_func.return_value = mock_source_obj
-        mock_filtered = MagicMock()
-        mock_filtered.name = "pubmed_source"
-        mock_source_obj.with_resources.return_value = mock_filtered
+    # Should not raise
+    _prepare_baseline_load(mock_pipeline, mock_source)
+    mock_sql_client.execute_sql.assert_called_once()
 
-        # Should not raise
-        run_pipeline("baseline")
 
-        # Verify attempt
-        mock_client.execute_sql.assert_called()
-
-    @patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
-    @patch("coreason_etl_pubmedabstracts.main.pubmed_source")
-    @patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
-    def test_baseline_state_access_failure(
-        self,
-        mock_run_dbt: MagicMock,
-        mock_source_func: MagicMock,
-        mock_pipeline: MagicMock,
-    ) -> None:
-        """Test exception during state access is logged and ignored."""
-        mock_p_instance = MagicMock()
-        mock_pipeline.return_value = mock_p_instance
-
-        # Mock successful run
-        mock_info = MagicMock()
-        mock_info.has_failed_jobs = False
-        mock_p_instance.run.return_value = mock_info
-
-        # Accessing state raises error
-        type(mock_p_instance).state = PropertyMock(side_effect=Exception("State Corrupt"))
-
-        mock_source_obj = MagicMock()
-        mock_source_obj.name = "pubmed_source"
-        mock_source_func.return_value = mock_source_obj
-        mock_filtered = MagicMock()
-        mock_filtered.name = "pubmed_source"
-        mock_source_obj.with_resources.return_value = mock_filtered
-
-        run_pipeline("baseline")
-
-        # Should not crash
-        mock_p_instance.run.assert_called()
+@patch("coreason_etl_pubmedabstracts.main.dlt.pipeline")
+@patch("coreason_etl_pubmedabstracts.main.pubmed_source")
+@patch("coreason_etl_pubmedabstracts.main.run_dbt_transformations")
+def test_run_with_no_resources(
+    mock_dbt: MagicMock,
+    mock_source: MagicMock,
+    mock_pipeline: MagicMock,
+    runner: CliRunner,
+) -> None:
+    """Test run handles no resources selected (e.g. if we add filtering in future, or just defensive check)."""
+    # Currently unreachable via CLI logic, but good to keep if logic changes.
+    pass

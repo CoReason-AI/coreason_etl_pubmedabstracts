@@ -8,32 +8,33 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_etl_pubmedabstracts
 
-import argparse
 import sys
-from typing import List, Optional
+from enum import Enum
+from typing import Annotated
 
 import dlt
+import typer
 from dlt.helpers.dbt import create_runner
 from dlt.sources import DltSource
 
 from coreason_etl_pubmedabstracts.pipelines.pubmed_pipeline import pubmed_source
 from coreason_etl_pubmedabstracts.utils.logger import logger
 
+# Initialize Typer app without explicit name if we rely on command discovery, or define command explicitly.
+# If we want a single command 'run' but invoked like 'python script.py run ...', we should use `app.command()`.
+# If we invoke it as 'python script.py ...', we might want `app.callback(invoke_without_command=True)`.
 
-def get_args(args: Optional[List[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Coreason ETL PubMed Abstracts Pipeline")
-    parser.add_argument(
-        "--load",
-        choices=["baseline", "updates", "all"],
-        default="all",
-        help="Which dataset to load (default: all)",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="If set, initializes the pipeline but does not run ingestion.",
-    )
-    return parser.parse_args(args)
+app = typer.Typer(
+    name="coreason_etl_pubmedabstracts",
+    help="Coreason ETL PubMed Abstracts Pipeline",
+    add_completion=False,
+)
+
+
+class LoadTarget(str, Enum):
+    baseline = "baseline"
+    updates = "updates"
+    all = "all"
 
 
 def run_dbt_transformations(pipeline: dlt.Pipeline, project_dir: str = "dbt_pubmed") -> None:
@@ -59,7 +60,7 @@ def run_dbt_transformations(pipeline: dlt.Pipeline, project_dir: str = "dbt_pubm
             # While _run_dbt_command is protected, it's the only way to invoke 'build'
             # via the current DBTPackageRunner API, and essential for the 'snapshot' requirement.
             logger.info("Running dbt build...")
-            runner._run_dbt_command("build", cmd_params=["--fail-fast"])
+            runner._run_dbt_command("build", command_args=["--fail-fast"])
 
         logger.info("dbt transformations completed successfully.")
 
@@ -103,15 +104,23 @@ def _prepare_baseline_load(pipeline: dlt.Pipeline, source: DltSource) -> None:
         logger.warning(f"State check/truncation failed: {e}. Proceeding with load.")
 
 
-def run_pipeline(load_target: str, dry_run: bool = False) -> None:
+@app.callback(invoke_without_command=True)  # type: ignore[misc]
+def run(
+    ctx: typer.Context,
+    load: Annotated[
+        LoadTarget, typer.Option(help="Which dataset to load (default: all)", case_sensitive=False)
+    ] = LoadTarget.all,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="If set, initializes the pipeline but does not run ingestion.")
+    ] = False,
+) -> None:
     """
     Orchestrate the ETL pipeline.
-
-    Args:
-        load_target: 'baseline', 'updates', or 'all'.
-        dry_run: If True, skip actual execution.
     """
-    logger.info(f"Initializing pipeline with target: {load_target}")
+    if ctx.invoked_subcommand is not None:
+        return  # pragma: no cover
+
+    logger.info(f"Initializing pipeline with target: {load.value}")
 
     # Initialize the dlt pipeline
     # dataset_name should match what is expected by dbt (e.g. 'pubmed')
@@ -128,12 +137,12 @@ def run_pipeline(load_target: str, dry_run: bool = False) -> None:
 
     # Determine which resources to run
     resources_to_run = []
-    if load_target in ("baseline", "all"):
+    if load.value in ("baseline", "all"):
         resources_to_run.append("pubmed_baseline")
-    if load_target in ("updates", "all"):
+    if load.value in ("updates", "all"):
         resources_to_run.append("pubmed_updates")
 
-    if not resources_to_run:
+    if not resources_to_run:  # pragma: no cover
         logger.warning("No resources selected to run.")
         return
 
@@ -149,26 +158,33 @@ def run_pipeline(load_target: str, dry_run: bool = False) -> None:
         _prepare_baseline_load(pipeline, source)
 
     # 3. Run the Pipeline
-    info = pipeline.run(source)
-    logger.info(f"Pipeline run completed. Load Info: {info}")
+    try:
+        info = pipeline.run(source)
+        logger.info(f"Pipeline run completed. Load Info: {info}")
 
-    # 4. Check for success (basic check)
-    if info.has_failed_jobs:
-        logger.error("Pipeline run reported failed jobs!")
+        # 4. Check for success (basic check)
+        if info.has_failed_jobs:
+            logger.error("Pipeline run reported failed jobs!")
+            sys.exit(1)
+
+        # 5. Run dbt transformations
+        # This runs regardless of load target, as updates also need transformation (Silver/Gold)
+        run_dbt_transformations(pipeline)
+    except Exception:
+        # Note: Exception logic is tested in test_pipeline_failure
+        logger.exception("Pipeline execution failed")
         sys.exit(1)
 
-    # 5. Run dbt transformations
-    # This runs regardless of load target, as updates also need transformation (Silver/Gold)
-    run_dbt_transformations(pipeline)
 
-
-@logger.catch  # type: ignore
 def main() -> None:
-    args = get_args()
+    """
+    Entry point for the application script.
+    """
     try:
-        run_pipeline(args.load, args.dry_run)
+        app()
     except Exception:
-        logger.exception("Pipeline execution failed")
+        # Typer handles exceptions nicely, but we ensure logger captures top-level crashes
+        logger.exception("Unhandled application error")
         sys.exit(1)
 
 
