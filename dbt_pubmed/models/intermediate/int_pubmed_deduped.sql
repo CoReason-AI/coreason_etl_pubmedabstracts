@@ -59,6 +59,31 @@ ranked as (
     where pmid is not null
 ),
 
+-- Filter Logic to Protect against Blind Overwrites
+filtered_upserts as (
+    select r.*
+    from ranked r
+    {% if is_incremental() %}
+    -- Join with target table to check existing state
+    left join {{ this }} t on r.pmid = t.source_id
+    {% endif %}
+    where r.rn = 1
+    and r.operation = 'upsert'
+    {% if is_incremental() %}
+    -- Only proceed if:
+    -- 1. It's a new record (t.source_id is null)
+    -- OR
+    -- 2. The incoming record is strictly 'newer' than the existing one.
+    --    Primary Key for versioning: file_name (Lexicographical)
+    --    Tie-Breaker: ingestion_ts
+    and (
+        t.source_id is null
+        or (r.file_name > t.file_name)
+        or (r.file_name = t.file_name and r.ingestion_ts > t.ingestion_ts)
+    )
+    {% endif %}
+),
+
 final as (
     select
         pmid as source_id,
@@ -116,9 +141,7 @@ final as (
         raw_data,
         file_name,
         ingestion_ts
-    from ranked
-    where rn = 1
-    and operation = 'upsert' -- Only keep if the latest operation is an upsert
+    from filtered_upserts
 )
 
 select * from final
