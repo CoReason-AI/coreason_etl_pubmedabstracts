@@ -332,3 +332,28 @@ def test_run_with_no_resources(
     """Test run handles no resources selected (e.g. if we add filtering in future, or just defensive check)."""
     # Currently unreachable via CLI logic, but good to keep if logic changes.
     pass
+
+
+def test_invalid_load_option(runner: CliRunner) -> None:
+    """Test passing an invalid value to --load."""
+    result = runner.invoke(app, ["--load", "invalid_value"])
+    assert result.exit_code != 0
+    # Use output instead of stdout
+    assert "Invalid value" in result.output
+
+
+def test_unexpected_argument(runner: CliRunner) -> None:
+    """Test passing an unexpected argument."""
+    result = runner.invoke(app, ["unexpected_arg"])
+    assert result.exit_code != 0
+    # Typer treats extra arguments as commands if invoke_without_command=True is set on a callback but no subcommands match.
+    # It prints "No such command".
+    assert "No such command 'unexpected_arg'" in result.output
+
+
+def test_help(runner: CliRunner) -> None:
+    """Test the --help flag."""
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    # Use output instead of stdout
+    assert "Coreason ETL PubMed Abstracts Pipeline" in result.output
