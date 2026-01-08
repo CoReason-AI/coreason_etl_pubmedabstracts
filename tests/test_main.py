@@ -346,7 +346,8 @@ def test_unexpected_argument(runner: CliRunner) -> None:
     """Test passing an unexpected argument."""
     result = runner.invoke(app, ["unexpected_arg"])
     assert result.exit_code != 0
-    # Typer treats extra arguments as commands if invoke_without_command=True is set on a callback but no subcommands match.
+    # Typer treats extra arguments as commands if invoke_without_command=True
+    # is set on a callback but no subcommands match.
     # It prints "No such command".
     assert "No such command 'unexpected_arg'" in result.output
 
