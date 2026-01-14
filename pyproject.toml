@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "coreason_etl_pubmedabstracts"
+name = "coreason-etl-pubmedabstracts"
 version = "0.1.0"
 description = "Fast, extensible Python ETL to maintain a local PubMed mirror"
 authors = ["Gowtham A Rao <gowtham.rao@coreason.ai>"]
@@ -29,7 +29,7 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [project]
-name = "coreason_etl_pubmedabstracts"
+name = "coreason-etl-pubmedabstracts"
 version = "0.1.0"
 description = "Fast, extensible Python ETL to maintain a local PubMed mirror"
 readme = "README.md"
