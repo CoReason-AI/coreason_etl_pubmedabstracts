@@ -1,4 +1,4 @@
-# coreason_etl_pubmedabstracts
+# coreason-etl-pubmedabstracts
 
 Fast, extensible Python ETL to maintain a local PubMed mirror
 
