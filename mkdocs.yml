@@ -1,4 +1,4 @@
-site_name: coreason_etl_pubmedabstracts
+site_name: coreason-etl-pubmedabstracts
 theme:
   name: material
 nav:
