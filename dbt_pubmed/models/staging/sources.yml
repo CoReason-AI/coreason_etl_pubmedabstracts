@@ -1,0 +1,8 @@
+version: 2
+
+sources:
+  - name: pubmed
+    schema: "bronze"  # Ensure this points to the shared schema
+    tables:
+      - name: pubmed_abstract_baseline  # <--- CHANGED from bronze_pubmed_baseline
+      - name: pubmed_abstract_updates   # <--- Match the other table name too

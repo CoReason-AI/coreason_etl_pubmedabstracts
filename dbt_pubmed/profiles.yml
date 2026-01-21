@@ -1,0 +1,12 @@
+coreason_etl_pubmedabstracts:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('PGHOST', 'localhost') }}"
+      user: "{{ env_var('PGUSER', 'postgres') }}"
+      pass: "{{ env_var('PGPASSWORD', 'postgres') }}"
+      port: "{{ env_var('PGPORT', 5432) | int }}"
+      dbname: "{{ env_var('PGDATABASE', 'postgres') }}"
+      schema: "{{ env_var('PGSCHEMA', 'public') }}"
+      threads: 4
